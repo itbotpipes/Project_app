@@ -1,0 +1,336 @@
+// Internal Operations App — data model
+// Dev DB: SQLite (zero-setup). Portable to PostgreSQL for production:
+// change the datasource provider to "postgresql" and set DATABASE_URL.
+// Enum-like fields are stored as String (SQLite has no native enums) with
+// constants defined in src/lib/constants.ts, so the schema stays portable.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ---------------------------------------------------------------------------
+// Org structure
+// ---------------------------------------------------------------------------
+
+model Department {
+  id    String @id @default(cuid())
+  name  String @unique
+  roles Role[]
+}
+
+model Role {
+  id           String     @id @default(cuid())
+  title        String     @unique
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  level        Int        @default(50) // lower = more senior (CEO=0 ... intern=90)
+  isField      Boolean    @default(false) // true = site team (report-based), false = back office (task-based)
+  description  String?
+  employees    Employee[]
+  kpiTemplates KpiTemplate[]
+}
+
+model Employee {
+  id           String    @id @default(cuid())
+  name         String
+  email        String    @unique
+  phone        String?
+  passwordHash String
+  roleId       String
+  role         Role      @relation(fields: [roleId], references: [id])
+  reportsToId  String?
+  reportsTo    Employee? @relation("Reports", fields: [reportsToId], references: [id])
+  reports      Employee[] @relation("Reports")
+  systemRole   String    @default("EMPLOYEE") // ADMIN | CEO | MANAGER | EMPLOYEE
+  active       Boolean   @default(true)
+  joinedAt     DateTime  @default(now())
+  birthday     DateTime?
+
+  createdTasks   Task[]  @relation("CreatedTasks")
+  assignedTasks  Task[]  @relation("AssignedTasks")
+  reviewTasks    Task[]  @relation("ReviewTasks")
+  comments       TaskComment[]
+  scores         MonthlyScore[]
+  scorecards     MonthlyScorecard[]
+  dailyReports   FieldDailyReport[]
+  reflections    WeeklyReflection[]
+  auditLogs      AuditLog[]
+  announcements  Announcement[]
+  rituals        DailyRitual[]
+  scoresReceived ManagerScore[] @relation("ScoreReceived")
+  scoresGiven    ManagerScore[] @relation("ScoreGiven")
+}
+
+// ---------------------------------------------------------------------------
+// Daily rituals (morning planning / evening shutdown)
+// ---------------------------------------------------------------------------
+
+model DailyRitual {
+  id              String   @id @default(cuid())
+  employeeId      String
+  employee        Employee @relation(fields: [employeeId], references: [id])
+  date            DateTime // normalized to start-of-day
+  morningPlanned  Boolean  @default(false)
+  eveningClosed   Boolean  @default(false)
+  plannedTaskIds  String?  // JSON array of task IDs open at the moment of morning planning
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@unique([employeeId, date])
+}
+
+// ---------------------------------------------------------------------------
+// Manager / HR / COO holistic scoring — separate from the auto-computed
+// per-KPI MonthlyScorecard. This is the human "I sat with them and scored
+// them out of 100" number, weekly or monthly.
+// ---------------------------------------------------------------------------
+
+model ManagerScore {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation("ScoreReceived", fields: [employeeId], references: [id])
+  ratedById   String
+  ratedBy     Employee @relation("ScoreGiven", fields: [ratedById], references: [id])
+  period      String   @default("MONTHLY") // WEEKLY | MONTHLY
+  periodStart DateTime // Monday for WEEKLY, 1st-of-month for MONTHLY
+  score       Float
+  note        String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@unique([employeeId, period, periodStart])
+}
+
+// ---------------------------------------------------------------------------
+// Announcements / Thought of the day / notices
+// ---------------------------------------------------------------------------
+
+model Announcement {
+  id        String   @id @default(cuid())
+  kind      String   @default("NOTICE") // THOUGHT | NOTICE | CELEBRATION
+  title     String?
+  body      String
+  pinned    Boolean  @default(false)
+  authorId  String?
+  author    Employee? @relation(fields: [authorId], references: [id])
+  createdAt DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// KPI framework (configurable, seeded from the spreadsheets)
+// ---------------------------------------------------------------------------
+
+model KpiTemplate {
+  id            String  @id @default(cuid())
+  roleId        String
+  role          Role    @relation(fields: [roleId], references: [id])
+  kraName       String  // Key Result Area, e.g. "Safety Compliance & Toolbox Talks"
+  kpiName       String  // the measurable KPI / bucket name
+  description   String?
+  target        String?
+  howToMeasure  String?
+  weightage     Float   @default(0) // points; a role's weightages sum to ~100
+  isPrimary     Boolean @default(true) // Primary vs Secondary KRA
+  orderIndex    Int     @default(0)
+
+  tasks  Task[]
+  scores MonthlyScore[]
+}
+
+// Per-KPI monthly score (used where we have the breakdown)
+model MonthlyScore {
+  id            String      @id @default(cuid())
+  employeeId    String
+  employee      Employee    @relation(fields: [employeeId], references: [id])
+  kpiTemplateId String
+  kpiTemplate   KpiTemplate @relation(fields: [kpiTemplateId], references: [id])
+  year          Int
+  month         Int         // 1-12
+  score         Float       @default(0)
+  note          String?
+
+  @@unique([employeeId, kpiTemplateId, year, month])
+}
+
+// Monthly total per employee (imported history OR computed aggregate)
+model MonthlyScorecard {
+  id         String   @id @default(cuid())
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  year       Int
+  month      Int
+  total      Float    @default(0)
+  locked     Boolean  @default(false)
+  source     String   @default("imported") // imported | computed | manual
+  updatedAt  DateTime @updatedAt
+
+  @@unique([employeeId, year, month])
+}
+
+// ---------------------------------------------------------------------------
+// TaskFlow — Kanban (back office)
+// ---------------------------------------------------------------------------
+
+model Task {
+  id            String   @id @default(cuid())
+  title         String
+  description   String?
+  status        String   @default("NEW") // see TASK_STATUS in constants
+  sizeLabel     String?  // EASY | MEDIUM | DIFFICULT
+  urgent        Boolean  @default(false)
+  important     Boolean  @default(false)
+  estimatedMins Int?
+  actualMins    Int?
+
+  creatorId     String
+  creator       Employee @relation("CreatedTasks", fields: [creatorId], references: [id])
+  assigneeId    String
+  assignee      Employee @relation("AssignedTasks", fields: [assigneeId], references: [id])
+
+  kpiTemplateId String?      // which KPI bucket this task fills
+  kpiTemplate   KpiTemplate? @relation(fields: [kpiTemplateId], references: [id])
+
+  reviewRequired Boolean  @default(false)
+  reviewerId     String?
+  reviewer       Employee? @relation("ReviewTasks", fields: [reviewerId], references: [id])
+  holdReason     String?  // mandatory when ON_HOLD
+
+  projectId     String?
+  project       Project? @relation(fields: [projectId], references: [id])
+
+  dueAt            DateTime?
+  startAt          DateTime?
+  endAt            DateTime?
+  carryForwardDate DateTime? // last time this task was auto-carried to "today"
+  carryCount       Int       @default(0)
+  completedAt      DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  comments    TaskComment[]
+  attachments Attachment[]
+  reminders   Reminder[]
+}
+
+model TaskComment {
+  id        String   @id @default(cuid())
+  taskId    String
+  task      Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  authorId  String
+  author    Employee @relation(fields: [authorId], references: [id])
+  body      String
+  createdAt DateTime @default(now())
+}
+
+model Attachment {
+  id        String   @id @default(cuid())
+  kind      String   @default("FILE") // FILE | VOICE | PHOTO
+  url       String   // stored path (local /uploads in dev, MinIO in prod)
+  filename  String?
+  taskId    String?
+  task      Task?    @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  reportId  String?
+  report    FieldDailyReport? @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+}
+
+model Reminder {
+  id       String   @id @default(cuid())
+  taskId   String
+  task     Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  remindAt DateTime
+  sent     Boolean  @default(false)
+}
+
+// ---------------------------------------------------------------------------
+// Field team — daily reporting
+// ---------------------------------------------------------------------------
+
+model FieldDailyReport {
+  id             String   @id @default(cuid())
+  employeeId     String
+  employee       Employee @relation(fields: [employeeId], references: [id])
+  date           DateTime
+  siteName       String
+  projectId      String?
+  project        Project? @relation(fields: [projectId], references: [id])
+  phase          String?  // work in progress: phase type
+  manpower       Int?
+  materialUpdate String?
+  phaseDeadline  DateTime?
+  siteDeadline   DateTime?
+  redFlags       String?
+  clientUpdatedWA Boolean @default(false)
+  tbtDone        Boolean  @default(false) // toolbox talk done
+  remarks        String?
+  createdAt      DateTime @default(now())
+
+  attachments Attachment[]
+}
+
+// ---------------------------------------------------------------------------
+// Weekly reflection (Friday 3 questions)
+// ---------------------------------------------------------------------------
+
+model WeeklyReflection {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation(fields: [employeeId], references: [id])
+  weekStart   DateTime
+  wentWell    String?
+  whatDelayed String?
+  whatImprove String?
+  createdAt   DateTime @default(now())
+
+  @@unique([employeeId, weekStart])
+}
+
+// ---------------------------------------------------------------------------
+// Projects (minimal now; expands into full PM module in Phase 4)
+// ---------------------------------------------------------------------------
+
+model Project {
+  id              String   @id @default(cuid())
+  name            String
+  client          String?
+  salesOrderValue Float?
+  status          String   @default("ACTIVE") // ACTIVE | COMPLETED | ON_HOLD
+  startDate       DateTime?
+  deadline        DateTime?
+  createdAt       DateTime @default(now())
+
+  tasks    Task[]
+  reports  FieldDailyReport[]
+  expenses ProjectExpense[]
+}
+
+model ProjectExpense {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  category    String   @default("MATERIAL") // MATERIAL | LABOUR | TRANSPORT | MISC
+  amount      Float    @default(0)
+  note        String?
+  createdById String?
+  createdAt   DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Audit log (anything score- or money-related)
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  actorId   String?
+  actor     Employee? @relation(fields: [actorId], references: [id])
+  action    String
+  entity    String
+  entityId  String?
+  detail    String?  // JSON string
+  createdAt DateTime @default(now())
+}
