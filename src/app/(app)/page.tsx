@@ -16,38 +16,19 @@ export default async function Dashboard() {
   const manager = isManagerLike(user.systemRole);
   const scorer = canScoreCompanyWide(user);
 
-  // My monthly scores (auto) + manager scores, merged into one trend
+  // My monthly scorecards: final total (manager-approved) vs system auto total
   const myCards = await prisma.monthlyScorecard.findMany({
     where: { employeeId: user.id },
     orderBy: [{ year: "asc" }, { month: "asc" }],
   });
-  const myManagerScores = await prisma.managerScore.findMany({
-    where: { employeeId: user.id, period: "MONTHLY" },
-    orderBy: { periodStart: "asc" },
-  });
-  const trendMap = new Map<string, { label: string; auto: number | null; manager: number | null }>();
-  for (const c of myCards) {
-    trendMap.set(`${c.year}-${c.month}`, { label: monthLabel(c.year, c.month), auto: c.total, manager: null });
-  }
-  for (const s of myManagerScores) {
-    const y = s.periodStart.getFullYear();
-    const m = s.periodStart.getMonth() + 1;
-    const key = `${y}-${m}`;
-    const existing = trendMap.get(key);
-    if (existing) existing.manager = s.score;
-    else trendMap.set(key, { label: monthLabel(y, m), auto: null, manager: s.score });
-  }
-  const trend = [...trendMap.entries()].map(([k, v]) => ({ ...v, sortKey: k })).sort((a, b) => a.sortKey.localeCompare(b.sortKey));
-
+  const trend = myCards.map((c) => ({
+    label: monthLabel(c.year, c.month),
+    auto: c.autoTotal || null,
+    manager: c.total,
+  }));
   const latestMine = myCards[myCards.length - 1];
-  const latestManagerScore = myManagerScores[myManagerScores.length - 1];
-  const effective = latestManagerScore?.score ?? latestMine?.total;
-  const avg = recentAverage(
-    myCards.map((c) => ({
-      ...c,
-      total: myManagerScores.find((s) => s.periodStart.getFullYear() === c.year && s.periodStart.getMonth() + 1 === c.month)?.score ?? c.total,
-    })),
-  );
+  const effective = latestMine?.total;
+  const avg = recentAverage(myCards);
   const band = incrementBand(avg);
 
   // My tasks
@@ -188,13 +169,7 @@ export default async function Dashboard() {
         <StatCard
           label="Latest score"
           value={effective != null ? Math.round(effective) : "—"}
-          sub={
-            latestManagerScore
-              ? `manager · ${monthLabel(latestManagerScore.periodStart.getFullYear(), latestManagerScore.periodStart.getMonth() + 1)}`
-              : latestMine
-                ? `auto · ${monthLabel(latestMine.year, latestMine.month)}`
-                : "no score yet"
-          }
+          sub={latestMine ? monthLabel(latestMine.year, latestMine.month) : "no score yet"}
           tone="green"
         />
         <StatCard
@@ -206,12 +181,21 @@ export default async function Dashboard() {
 
       {/* Thought of the day + announcements + birthdays */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {thought && (
+        {(thought || scorer) && (
           <Card className="lg:col-span-2 border-blue-100 bg-blue-50/50">
-            <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">
-              💭 Thought of the day{thought.author ? ` — ${thought.author.name}` : ""}
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">
+                💭 Thought of the day{thought?.author ? ` — ${thought.author.name}` : ""}
+              </div>
+              {scorer && (
+                <Link href="/announcements" className="text-xs font-medium text-blue-600 hover:underline">
+                  Edit ✎
+                </Link>
+              )}
             </div>
-            <p className="mt-2 text-sm text-slate-700">{thought.body}</p>
+            <p className="mt-2 text-sm text-slate-700">
+              {thought?.body ?? <span className="text-slate-400">No thought set yet — click Edit to add one.</span>}
+            </p>
             {notices.length > 0 && (
               <ul className="mt-4 space-y-2 border-t border-blue-100 pt-3">
                 {notices.map((n) => (

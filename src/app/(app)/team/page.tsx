@@ -5,7 +5,6 @@ import { prisma } from "@/lib/db";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel } from "@/lib/scores";
 import { Card, SectionTitle, Badge } from "../_components/ui";
-import ScorecardEditor from "./ScorecardEditor";
 
 export default async function TeamPage() {
   const user = await getCurrentUser();
@@ -17,7 +16,6 @@ export default async function TeamPage() {
     include: {
       role: true,
       scorecards: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 1 },
-      scoresReceived: { where: { period: "MONTHLY" }, orderBy: { periodStart: "desc" }, take: 1 },
       _count: { select: { assignedTasks: { where: { status: { notIn: ["CLOSED"] } } } } },
     },
     orderBy: { name: "asc" },
@@ -47,31 +45,17 @@ export default async function TeamPage() {
     Underutilized: "bg-amber-100 text-amber-700",
   };
 
-  // KPI templates per role (for the score editor)
-  const roleIds = [...new Set(reports.map((r) => r.roleId))];
-  const kpis = await prisma.kpiTemplate.findMany({
-    where: { roleId: { in: roleIds } },
-    orderBy: { orderIndex: "asc" },
-  });
-  const kpisByRole = new Map<string, typeof kpis>();
-  for (const k of kpis) {
-    const arr = kpisByRole.get(k.roleId) ?? [];
-    arr.push(k);
-    kpisByRole.set(k.roleId, arr);
-  }
-
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
           <h1 className="text-2xl font-semibold">My Team</h1>
           <p className="text-sm text-slate-500">
-            {reports.length} direct report{reports.length === 1 ? "" : "s"} · scores, tasks &amp;
-            monthly KRA scoring
+            {reports.length} direct report{reports.length === 1 ? "" : "s"} · tasks &amp; monthly scores
           </p>
         </div>
-        <Link href="/scores" className="text-sm font-medium text-blue-600 hover:underline">
-          Open scoring panel →
+        <Link href="/scores" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
+          Open Scoring Panel →
         </Link>
       </div>
 
@@ -99,59 +83,45 @@ export default async function TeamPage() {
         </Card>
       )}
 
-      <div className="space-y-4">
-        {reports.map((r) => {
-          const latest = r.scorecards[0];
-          const manScore = r.scoresReceived[0];
-          const effective = manScore?.score ?? latest?.total;
-          const band = effective != null ? incrementBand(effective) : null;
-          return (
-            <Card key={r.id}>
-              <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-                <div className="grid h-10 w-10 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700">
-                  {r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                </div>
-                <div className="min-w-0">
-                  <div className="font-medium">{r.name}</div>
-                  <div className="text-xs text-slate-500">{r.role.title}</div>
-                </div>
-                <div className="ml-auto flex items-center gap-2">
-                  <Badge className="bg-blue-100 text-blue-700">
-                    {r._count.assignedTasks} open task{r._count.assignedTasks === 1 ? "" : "s"}
-                  </Badge>
-                  {latest ? (
-                    <Badge className="bg-slate-100 text-slate-700" title="Auto-computed from tasks/KPIs">
-                      Auto {Math.round(latest.total)} · {monthLabel(latest.year, latest.month)}
+      {reports.length > 0 && (
+        <Card>
+          <SectionTitle>Team scores</SectionTitle>
+          <div className="divide-y divide-slate-100">
+            {reports.map((r) => {
+              const latest = r.scorecards[0];
+              const band = latest ? incrementBand(latest.total) : null;
+              return (
+                <div key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
+                  <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
+                    {r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="font-medium">{r.name}</div>
+                    <div className="text-xs text-slate-500">{r.role.title}</div>
+                  </div>
+                  <div className="ml-auto flex items-center gap-2">
+                    <Badge className="bg-blue-100 text-blue-700">
+                      {r._count.assignedTasks} open
                     </Badge>
-                  ) : (
-                    <Badge className="bg-slate-100 text-slate-400">no auto score</Badge>
-                  )}
-                  {manScore ? (
-                    <Badge className="bg-violet-100 text-violet-700" title="Manager's holistic score">
-                      Manager {Math.round(manScore.score)}
-                    </Badge>
-                  ) : (
-                    <Badge className="bg-violet-50 text-violet-400">not scored</Badge>
-                  )}
-                  {band && <Badge className="bg-emerald-50 text-emerald-700">{band.label}</Badge>}
+                    {latest ? (
+                      <Badge className="bg-slate-100 text-slate-700">
+                        Score {Math.round(latest.total)} · {monthLabel(latest.year, latest.month)}
+                      </Badge>
+                    ) : (
+                      <Badge className="bg-slate-100 text-slate-400">not scored</Badge>
+                    )}
+                    {band && <Badge className="bg-emerald-50 text-emerald-700">{band.label}</Badge>}
+                  </div>
                 </div>
-              </div>
-              <div className="mt-3 border-t border-slate-100 pt-3">
-                <ScorecardEditor
-                  employeeId={r.id}
-                  employeeName={r.name}
-                  kpis={(kpisByRole.get(r.roleId) ?? []).map((k) => ({
-                    id: k.id,
-                    kpiName: k.kpiName,
-                    kraName: k.kraName,
-                    weightage: k.weightage,
-                  }))}
-                />
-              </div>
-            </Card>
-          );
-        })}
-      </div>
+              );
+            })}
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            To score your team per KPI (or adjust the system&apos;s auto scores), open the{" "}
+            <Link href="/scores" className="text-blue-600 hover:underline">Scoring Panel</Link>.
+          </p>
+        </Card>
+      )}
     </div>
   );
 }

@@ -1,22 +1,13 @@
 import Link from "next/link";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { TASK_STATUS_ORDER, TASK_STATUS_LABEL } from "@/lib/constants";
+import { TASK_STATUS_ORDER } from "@/lib/constants";
 import { mondayOf } from "@/lib/date";
 import { cn } from "@/lib/cn";
 import { Card, SectionTitle } from "../_components/ui";
 import BucketFill from "../_components/BucketFill";
 import NewTaskDialog from "./NewTaskDialog";
-import TaskCard from "./TaskCard";
-
-const columnTint: Record<string, string> = {
-  NEW: "bg-slate-100",
-  ACCEPTED: "bg-sky-100",
-  IN_PROGRESS: "bg-blue-100",
-  ON_HOLD: "bg-amber-100",
-  PENDING_REVIEW: "bg-violet-100",
-  CLOSED: "bg-emerald-100",
-};
+import KanbanBoard from "./KanbanBoard";
 
 export default async function BoardPage({
   searchParams,
@@ -95,13 +86,24 @@ export default async function BoardPage({
     : [];
   const people = [{ id: user.id, name: `${user.name} (me)` }, ...assignable];
 
-  // group tasks; fold REOPENED/CARRIED_FORWARD into NEW column for display
-  const byStatus: Record<string, typeof tasks> = {};
-  for (const s of TASK_STATUS_ORDER) byStatus[s] = [];
-  for (const t of tasks) {
-    const col = TASK_STATUS_ORDER.includes(t.status as never) ? t.status : "NEW";
-    byStatus[col].push(t);
-  }
+  // serialize tasks for the client Kanban board
+  const boardTasks = tasks.map((t) => ({
+    id: t.id,
+    title: t.title,
+    status: t.status,
+    sizeLabel: t.sizeLabel,
+    urgent: t.urgent,
+    important: t.important,
+    estimatedMins: t.estimatedMins,
+    dueAt: t.dueAt ? t.dueAt.toISOString() : null,
+    holdReason: t.holdReason,
+    reviewRequired: t.reviewRequired,
+    carryCount: t.carryCount,
+    kpiName: t.kpiTemplate?.kpiName ?? null,
+    projectName: t.project?.name ?? null,
+    delegatedBy:
+      t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name ?? null : null,
+  }));
 
   return (
     <div className="space-y-4">
@@ -147,37 +149,10 @@ export default async function BoardPage({
         </div>
       )}
 
-      <div className="flex gap-4 overflow-x-auto scroll-thin pb-4">
-        {TASK_STATUS_ORDER.map((status) => (
-          <div key={status} className="w-72 shrink-0">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className={`h-2.5 w-2.5 rounded-full ${columnTint[status]}`} />
-                <h2 className="text-sm font-semibold text-slate-700">
-                  {TASK_STATUS_LABEL[status]}
-                </h2>
-              </div>
-              <span className="rounded-full bg-slate-100 px-2 text-xs text-slate-500">
-                {byStatus[status].length}
-              </span>
-            </div>
-            <div className="space-y-2 rounded-xl bg-slate-100/60 p-2 min-h-24">
-              {byStatus[status].map((t) => (
-                <TaskCard
-                  key={t.id}
-                  task={t}
-                  delegatedBy={
-                    t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name : null
-                  }
-                />
-              ))}
-              {!byStatus[status].length && (
-                <div className="py-6 text-center text-xs text-slate-400">—</div>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
+      <p className="text-xs text-slate-400">
+        💡 Drag a card between columns to change its status — or use the “Move to…” dropdown on each card.
+      </p>
+      <KanbanBoard initialTasks={boardTasks} columns={[...TASK_STATUS_ORDER]} />
     </div>
   );
 }

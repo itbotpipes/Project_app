@@ -64,6 +64,7 @@ model Employee {
   rituals        DailyRitual[]
   scoresReceived ManagerScore[] @relation("ScoreReceived")
   scoresGiven    ManagerScore[] @relation("ScoreGiven")
+  yearlyReviews  YearlyReview[]
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +143,7 @@ model KpiTemplate {
   scores MonthlyScore[]
 }
 
-// Per-KPI monthly score (used where we have the breakdown)
+// Per-KPI monthly score (system auto value + manager's final/override)
 model MonthlyScore {
   id            String      @id @default(cuid())
   employeeId    String
@@ -151,7 +152,8 @@ model MonthlyScore {
   kpiTemplate   KpiTemplate @relation(fields: [kpiTemplateId], references: [id])
   year          Int
   month         Int         // 1-12
-  score         Float       @default(0)
+  autoScore     Float       @default(0) // system-computed from task activity
+  score         Float       @default(0) // manager's final value (defaults to autoScore)
   note          String?
 
   @@unique([employeeId, kpiTemplateId, year, month])
@@ -164,12 +166,27 @@ model MonthlyScorecard {
   employee   Employee @relation(fields: [employeeId], references: [id])
   year       Int
   month      Int
-  total      Float    @default(0)
+  total      Float    @default(0) // sum of final per-KPI scores
+  autoTotal  Float    @default(0) // sum of system auto per-KPI scores
   locked     Boolean  @default(false)
   source     String   @default("imported") // imported | computed | manual
   updatedAt  DateTime @updatedAt
 
   @@unique([employeeId, year, month])
+}
+
+// Annual inputs for the increment projection (behaviour + target achievement)
+model YearlyReview {
+  id                String   @id @default(cuid())
+  employeeId        String
+  employee          Employee @relation(fields: [employeeId], references: [id])
+  year              Int
+  behaviourScore    Float?   // 0-100, manager-assessed
+  targetAchievedPct Float?   // 0-100, target vs actual
+  note              String?
+  updatedAt         DateTime @updatedAt
+
+  @@unique([employeeId, year])
 }
 
 // ---------------------------------------------------------------------------

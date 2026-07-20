@@ -1,59 +1,65 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import { mondayOf, monthStartOf, previousMonthStart } from "@/lib/date";
+import { monthStartOf, previousMonthStart } from "@/lib/date";
+import { computeAutoScores } from "@/lib/autoscore";
 import { Card, SectionTitle, Badge } from "../_components/ui";
-import RowForm from "./RowForm";
-
-function fmtISO(d: Date) {
-  return d.toISOString().slice(0, 10);
-}
+import KpiScoreEditor from "./KpiScoreEditor";
 
 export default async function ScoresPage({
   searchParams,
 }: {
-  searchParams: Promise<{ period?: string; date?: string }>;
+  searchParams: Promise<{ date?: string }>;
 }) {
   const user = await getCurrentUser();
   if (!user) return null;
-
   const companyWide = canScoreCompanyWide(user);
   const manager = isManagerLike(user.systemRole);
   if (!companyWide && !manager) redirect("/");
 
   const sp = await searchParams;
-  const period = sp.period === "WEEKLY" ? "WEEKLY" : "MONTHLY";
-  const periodStart =
-    period === "WEEKLY"
-      ? mondayOf(sp.date ? new Date(sp.date) : new Date())
-      : sp.date
-        ? monthStartOf(new Date(sp.date))
-        : previousMonthStart();
-  const isoStart = fmtISO(periodStart);
-  const monthValue = `${periodStart.getFullYear()}-${String(periodStart.getMonth() + 1).padStart(2, "0")}`;
+  const periodStart = sp.date ? monthStartOf(new Date(sp.date)) : previousMonthStart();
+  const year = periodStart.getFullYear();
+  const month = periodStart.getMonth() + 1;
+  const monthEnd = new Date(year, month, 1);
+  const monthValue = `${year}-${String(month).padStart(2, "0")}`;
+  const monthLabel = periodStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
-  // Company-wide scorers see everyone; line managers see only their direct reports.
   const employees = await prisma.employee.findMany({
     where: companyWide ? { active: true } : { active: true, reportsToId: user.id },
     include: { role: { include: { department: true } } },
     orderBy: [{ role: { level: "asc" } }, { name: "asc" }],
   });
-
   const empIds = employees.map((e) => e.id);
-  const [managerScores, autoScores] = await Promise.all([
-    prisma.managerScore.findMany({ where: { employeeId: { in: empIds }, period, periodStart } }),
-    period === "MONTHLY"
-      ? prisma.monthlyScorecard.findMany({
-          where: {
-            employeeId: { in: empIds },
-            year: periodStart.getFullYear(),
-            month: periodStart.getMonth() + 1,
-          },
-        })
-      : Promise.resolve([]),
+
+  const [kpiTemplates, existingScores, tasks, reviews] = await Promise.all([
+    prisma.kpiTemplate.findMany({
+      where: { roleId: { in: [...new Set(employees.map((e) => e.roleId))] } },
+      orderBy: { orderIndex: "asc" },
+    }),
+    prisma.monthlyScore.findMany({ where: { employeeId: { in: empIds }, year, month } }),
+    prisma.task.findMany({
+      where: { assigneeId: { in: empIds }, createdAt: { gte: periodStart, lt: monthEnd } },
+      select: { assigneeId: true, kpiTemplateId: true, status: true, createdAt: true, completedAt: true, carryCount: true },
+    }),
+    prisma.yearlyReview.findMany({ where: { employeeId: { in: empIds }, year } }),
   ]);
-  const mScoreMap = new Map(managerScores.map((s) => [s.employeeId, s]));
-  const aScoreMap = new Map(autoScores.map((s) => [s.employeeId, s]));
+
+  const kpisByRole = new Map<string, typeof kpiTemplates>();
+  for (const k of kpiTemplates) {
+    const arr = kpisByRole.get(k.roleId) ?? [];
+    arr.push(k);
+    kpisByRole.set(k.roleId, arr);
+  }
+  const tasksByEmp = new Map<string, typeof tasks>();
+  for (const t of tasks) {
+    const arr = tasksByEmp.get(t.assigneeId) ?? [];
+    arr.push(t);
+    tasksByEmp.set(t.assigneeId, arr);
+  }
+  const scoreKey = (e: string, k: string) => `${e}|${k}`;
+  const scoreMap = new Map(existingScores.map((s) => [scoreKey(s.employeeId, s.kpiTemplateId), s]));
+  const reviewMap = new Map(reviews.map((r) => [r.employeeId, r]));
 
   const byDept = new Map<string, typeof employees>();
   for (const e of employees) {
@@ -63,34 +69,25 @@ export default async function ScoresPage({
     byDept.set(d, arr);
   }
 
-  const monthLabel = periodStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
-
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Performance Scoring Panel</h1>
         <p className="text-sm text-slate-500">
-          Two numbers per person: the <strong>Auto score</strong> (computed from their daily task
-          routine &amp; KPI buckets) and the <strong>Manager score</strong> (your own assessment out
-          of 100, from observation &amp; discussion). Both feed their growth chart.
+          Each KPI is scored <strong>automatically</strong> from the employee&apos;s tasks
+          (completion, consistency, no rework). You review and adjust each one — the total rolls up
+          to their scorecard and shows on their Performance panel.
         </p>
       </div>
 
       <Card>
         <form className="flex flex-wrap items-end gap-3" method="GET">
           <label className="text-xs font-medium text-slate-600">
-            Period
-            <select name="period" defaultValue={period} className="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm">
-              <option value="MONTHLY">Monthly</option>
-              <option value="WEEKLY">Weekly</option>
-            </select>
-          </label>
-          <label className="text-xs font-medium text-slate-600">
-            {period === "WEEKLY" ? "Any date in the week" : "Month"}
+            Month
             <input
               name="date"
-              type={period === "WEEKLY" ? "date" : "month"}
-              defaultValue={period === "WEEKLY" ? isoStart : monthValue}
+              type="month"
+              defaultValue={monthValue}
               className="mt-1 block rounded-lg border border-slate-300 px-2 py-1.5 text-sm"
             />
           </label>
@@ -98,7 +95,7 @@ export default async function ScoresPage({
             Go
           </button>
           <span className="text-sm text-slate-500">
-            Scoring: <strong>{period === "WEEKLY" ? `week of ${isoStart}` : monthLabel}</strong>
+            Scoring: <strong>{monthLabel}</strong>
           </span>
         </form>
       </Card>
@@ -108,36 +105,65 @@ export default async function ScoresPage({
           <SectionTitle>{dept}</SectionTitle>
           <div className="space-y-3">
             {list.map((e) => {
-              const auto = aScoreMap.get(e.id);
-              const man = mScoreMap.get(e.id);
+              const kpis = kpisByRole.get(e.roleId) ?? [];
+              const auto = computeAutoScores(
+                kpis.map((k) => ({ id: k.id, weightage: k.weightage })),
+                tasksByEmp.get(e.id) ?? [],
+              );
+              const rows = kpis.map((k) => {
+                const existing = scoreMap.get(scoreKey(e.id, k.id));
+                const a = auto.get(k.id);
+                return {
+                  id: k.id,
+                  name: k.kpiName,
+                  kra: k.kraName,
+                  weightage: k.weightage,
+                  auto: a?.auto ?? 0,
+                  tasks: a?.total ?? 0,
+                  current: existing ? existing.score : null,
+                  saved: !!existing,
+                };
+              });
+              const autoTotal = rows.reduce((s, r) => s + r.auto, 0);
+              const finalTotal = rows.reduce((s, r) => s + (r.current ?? r.auto), 0);
+              const anySaved = rows.some((r) => r.saved);
+              const review = reviewMap.get(e.id);
+
               return (
-                <div
-                  key={e.id}
-                  className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 p-3"
-                >
-                  <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
-                    {e.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
-                  </div>
-                  <div className="min-w-[9rem]">
-                    <div className="text-sm font-medium">{e.name}</div>
-                    <div className="text-xs text-slate-500">{e.role.title}</div>
-                  </div>
-                  <Badge className="bg-blue-50 text-blue-700" title="Auto-computed from tasks/KPIs this month">
-                    Auto: {auto ? Math.round(auto.total) : "—"}
-                  </Badge>
-                  <Badge className="bg-violet-50 text-violet-700" title="Manager's holistic score">
-                    Manager: {man ? Math.round(man.score) : "—"}
-                  </Badge>
-                  <div className="ml-auto">
-                    <RowForm
+                <details key={e.id} className="rounded-xl border border-slate-200">
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-3 p-3">
+                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
+                      {e.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                    </div>
+                    <div className="min-w-[9rem]">
+                      <div className="text-sm font-medium">{e.name}</div>
+                      <div className="text-xs text-slate-500">{e.role.title}</div>
+                    </div>
+                    <div className="ml-auto flex items-center gap-2">
+                      <Badge className="bg-blue-50 text-blue-700" title="System auto total">
+                        Auto {Math.round(autoTotal)}
+                      </Badge>
+                      <Badge
+                        className={anySaved ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"}
+                        title="Final total after your review"
+                      >
+                        Final {Math.round(finalTotal)}
+                      </Badge>
+                      <span className="text-xs text-slate-400">▼</span>
+                    </div>
+                  </summary>
+                  <div className="border-t border-slate-100 p-3">
+                    <KpiScoreEditor
                       employeeId={e.id}
-                      period={period}
-                      periodStart={isoStart}
-                      initialScore={man?.score ?? null}
-                      initialNote={man?.note ?? null}
+                      employeeName={e.name}
+                      year={year}
+                      month={month}
+                      rows={rows}
+                      behaviourScore={review?.behaviourScore ?? null}
+                      targetAchievedPct={review?.targetAchievedPct ?? null}
                     />
                   </div>
-                </div>
+                </details>
               );
             })}
           </div>
@@ -146,7 +172,7 @@ export default async function ScoresPage({
 
       {!employees.length && (
         <Card>
-          <p className="text-sm text-slate-400">No one to score yet.</p>
+          <p className="text-sm text-slate-400">No one to score.</p>
         </Card>
       )}
     </div>

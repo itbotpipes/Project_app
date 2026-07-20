@@ -3,7 +3,7 @@ import { prisma } from "@/lib/db";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
 import { Card, StatCard, SectionTitle, Badge } from "../_components/ui";
-import { DualTrendLine, Donut, Legend, ScoreBars } from "../_components/Charts";
+import { DualTrendLine, Donut, Legend, ScoreBars, IncrementBar } from "../_components/Charts";
 import BucketFill from "../_components/BucketFill";
 
 function readiness(avg: number) {
@@ -22,38 +22,31 @@ export default async function PerformancePage() {
     where: { employeeId: user.id },
     orderBy: [{ year: "asc" }, { month: "asc" }],
   });
-  const myManagerScores = await prisma.managerScore.findMany({
-    where: { employeeId: user.id, period: "MONTHLY" },
-    orderBy: { periodStart: "asc" },
-  });
 
-  // Merge auto + manager scores into one month-by-month trend
-  const trendMap = new Map<string, { label: string; auto: number | null; manager: number | null; y: number; m: number }>();
-  for (const c of myCards) {
-    const key = `${c.year}-${c.month}`;
-    trendMap.set(key, { label: monthLabel(c.year, c.month), auto: c.total, manager: null, y: c.year, m: c.month });
-  }
-  for (const s of myManagerScores) {
-    const y = s.periodStart.getFullYear();
-    const m = s.periodStart.getMonth() + 1;
-    const key = `${y}-${m}`;
-    const existing = trendMap.get(key);
-    if (existing) existing.manager = s.score;
-    else trendMap.set(key, { label: monthLabel(y, m), auto: null, manager: s.score, y, m });
-  }
-  const trend = [...trendMap.values()].sort((a, b) => (a.y === b.y ? a.m - b.m : a.y - b.y));
+  // Trend: system auto total vs the manager-approved final total, month by month
+  const trend = myCards.map((c) => ({
+    label: monthLabel(c.year, c.month),
+    auto: c.autoTotal || null,
+    manager: c.total,
+  }));
 
-  // Manager's holistic score is the number that drives increments when present; else fall back to auto.
-  const latestManager = myManagerScores[myManagerScores.length - 1];
-  const effectiveCards = myCards.map((c) => {
-    const override = myManagerScores.find(
-      (s) => s.periodStart.getFullYear() === c.year && s.periodStart.getMonth() + 1 === c.month,
-    );
-    return { ...c, total: override?.score ?? c.total };
-  });
-  const avg = recentAverage(effectiveCards.length ? effectiveCards : myCards);
+  const latestFinal = myCards[myCards.length - 1];
+  const avg = recentAverage(myCards);
   const band = incrementBand(avg);
   const ready = readiness(avg);
+
+  // Annual increment projection (behaviour + target from the manager's yearly review)
+  const nowYear = new Date().getFullYear();
+  const review = await prisma.yearlyReview.findUnique({
+    where: { employeeId_year: { employeeId: user.id, year: nowYear } },
+  });
+  const kpiComponent = Math.round((Math.min(100, avg) / 100) * 5 * 10) / 10; // max 5%
+  const behaviourComponent =
+    review?.behaviourScore != null ? Math.round((review.behaviourScore / 100) * 5 * 10) / 10 : null; // max 5%
+  const targetComponent =
+    review?.targetAchievedPct != null ? Math.round((review.targetAchievedPct / 100) * 10 * 10) / 10 : null; // max 10%
+  const incrementTotal =
+    kpiComponent + (behaviourComponent ?? 0) + (targetComponent ?? 0);
 
   const myKpis = await prisma.kpiTemplate.findMany({
     where: { roleId: user.roleId },
@@ -87,17 +80,12 @@ export default async function PerformancePage() {
         include: {
           role: true,
           scorecards: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 1 },
-          scoresReceived: { where: { period: "MONTHLY" }, orderBy: { periodStart: "desc" }, take: 1 },
         },
         orderBy: { name: "asc" },
       })
     : [];
-  // Prefer the manager's holistic score when one exists; fall back to the auto-computed total.
   const teamBars = reports
-    .map((r) => ({
-      name: r.name,
-      score: Math.round(r.scoresReceived[0]?.score ?? r.scorecards[0]?.total ?? 0),
-    }))
+    .map((r) => ({ name: r.name, score: Math.round(r.scorecards[0]?.total ?? 0) }))
     .filter((r) => r.score > 0);
 
   return (
@@ -117,13 +105,9 @@ export default async function PerformancePage() {
           sub="per company policy"
         />
         <StatCard
-          label="Latest manager score"
-          value={latestManager ? Math.round(latestManager.score) : "—"}
-          sub={
-            latestManager
-              ? monthLabel(latestManager.periodStart.getFullYear(), latestManager.periodStart.getMonth() + 1)
-              : "not yet scored"
-          }
+          label="Latest score"
+          value={latestFinal ? Math.round(latestFinal.total) : "—"}
+          sub={latestFinal ? monthLabel(latestFinal.year, latestFinal.month) : "not yet scored"}
           tone="blue"
         />
         <Card>
@@ -161,6 +145,32 @@ export default async function PerformancePage() {
       <Card>
         <SectionTitle>🪣 What I&apos;ve actually worked on this month</SectionTitle>
         <BucketFill buckets={bucketFillData} />
+      </Card>
+
+      <Card>
+        <SectionTitle>📈 Annual increment projection ({nowYear})</SectionTitle>
+        <IncrementBar
+          kpi={kpiComponent}
+          behaviour={behaviourComponent ?? 0}
+          target={targetComponent ?? 0}
+          maxTotal={20}
+        />
+        <p className="mt-3 text-xs text-slate-500">
+          A structured, minimum-increment guide reviewed after a year of data: <b>5%</b> on
+          task/KPI performance (from your average score), <b>5%</b> on behaviour, and <b>10%</b> on
+          target vs. actual.{" "}
+          {behaviourComponent == null || targetComponent == null ? (
+            <span className="text-amber-600">
+              Behaviour and/or target still need to be set by your manager in the Scoring Panel — until
+              then only the KPI portion is shown.
+            </span>
+          ) : (
+            <>
+              Your projected minimum increment is{" "}
+              <b className="text-slate-800">{Math.round(incrementTotal * 10) / 10}%</b>.
+            </>
+          )}
+        </p>
       </Card>
 
       {manager && (

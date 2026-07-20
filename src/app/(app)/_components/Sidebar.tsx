@@ -8,11 +8,12 @@ import {
   Users,
   TrendingUp,
   Contact,
-  NotebookPen,
+  Sparkles,
   Settings,
   Network,
   ClipboardCheck,
   Trophy,
+  Megaphone,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -34,9 +35,10 @@ export default function Sidebar({
     { href: "/board", label: "My Board", icon: KanbanSquare },
     ...(showManager ? [{ href: "/team", label: "My Team", icon: Users }] : []),
     { href: "/performance", label: "Performance", icon: TrendingUp },
-    { href: "/reflection", label: "Weekly Reflection", icon: NotebookPen },
+    { href: "/insights", label: "AI Insights", icon: Sparkles },
     { href: "/org", label: "Org Chart", icon: Network },
     ...(showScoring ? [{ href: "/scores", label: "Score Panel", icon: ClipboardCheck }] : []),
+    ...(showScoring ? [{ href: "/announcements", label: "Announcements", icon: Megaphone }] : []),
     ...(showManager ? [{ href: "/people", label: "Directory", icon: Contact }] : []),
     ...(showAdmin ? [{ href: "/leaderboard", label: "Leaderboard", icon: Trophy }] : []),
     ...(showAdmin ? [{ href: "/admin", label: "Admin", icon: Settings }] : []),

@@ -140,6 +140,43 @@ export function ScoreBars({
   );
 }
 
+/** Stacked horizontal bar showing the 3 increment components toward the max policy %. */
+export function IncrementBar({
+  kpi,
+  behaviour,
+  target,
+  maxTotal,
+}: {
+  kpi: number;
+  behaviour: number;
+  target: number;
+  maxTotal: number;
+}) {
+  const total = Math.round((kpi + behaviour + target) * 10) / 10;
+  const seg = (v: number) => `${(v / maxTotal) * 100}%`;
+  return (
+    <div>
+      <div className="flex h-8 w-full overflow-hidden rounded-lg bg-slate-100">
+        <div className="flex items-center justify-center bg-blue-500 text-[10px] font-semibold text-white" style={{ width: seg(kpi) }} title={`Task/KPI: ${kpi}%`}>
+          {kpi > 0.4 ? `${kpi}%` : ""}
+        </div>
+        <div className="flex items-center justify-center bg-emerald-500 text-[10px] font-semibold text-white" style={{ width: seg(behaviour) }} title={`Behaviour: ${behaviour}%`}>
+          {behaviour > 0.4 ? `${behaviour}%` : ""}
+        </div>
+        <div className="flex items-center justify-center bg-violet-500 text-[10px] font-semibold text-white" style={{ width: seg(target) }} title={`Target vs actual: ${target}%`}>
+          {target > 0.4 ? `${target}%` : ""}
+        </div>
+      </div>
+      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs">
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-blue-500" /> Task/KPI (max 5%): <b>{kpi}%</b></span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-emerald-500" /> Behaviour (max 5%): <b>{behaviour}%</b></span>
+        <span className="flex items-center gap-1.5"><span className="h-2.5 w-2.5 rounded-sm bg-violet-500" /> Target vs actual (max 10%): <b>{target}%</b></span>
+        <span className="ml-auto font-semibold text-slate-800">Total: {total}% of {maxTotal}%</span>
+      </div>
+    </div>
+  );
+}
+
 export function Legend({ data }: { data: { name: string; value: number }[] }) {
   return (
     <ul className="mt-2 space-y-1">

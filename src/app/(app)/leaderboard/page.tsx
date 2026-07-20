@@ -30,12 +30,9 @@ export default async function LeaderboardPage({
   });
   const empIds = employees.map((e) => e.id);
 
-  const [autoScores, managerScores, tasksInPeriod, closedTasks] = await Promise.all([
+  const [scorecards, tasksInPeriod, closedTasks] = await Promise.all([
     prisma.monthlyScorecard.findMany({
       where: { employeeId: { in: empIds }, year: periodStart.getFullYear(), month: periodStart.getMonth() + 1 },
-    }),
-    prisma.managerScore.findMany({
-      where: { employeeId: { in: empIds }, period: "MONTHLY", periodStart },
     }),
     prisma.task.findMany({
       where: { assigneeId: { in: empIds }, createdAt: { gte: periodStart, lt: periodEnd } },
@@ -51,8 +48,8 @@ export default async function LeaderboardPage({
     }),
   ]);
 
-  const autoMap = new Map(autoScores.map((s) => [s.employeeId, s.total]));
-  const managerMap = new Map(managerScores.map((s) => [s.employeeId, s.score]));
+  // Final scorecard total already reflects the manager's per-KPI review.
+  const scoreMap = new Map(scorecards.map((s) => [s.employeeId, s.total]));
 
   const daysElapsed = Math.max(
     1,
@@ -84,7 +81,7 @@ export default async function LeaderboardPage({
   }
   for (const e of employees) {
     const agg = byDept.get(deptOf.get(e.id)!)!;
-    const effective = managerMap.get(e.id) ?? autoMap.get(e.id);
+    const effective = scoreMap.get(e.id);
     if (effective != null) {
       agg.scoreSum += effective;
       agg.scoreCount++;
