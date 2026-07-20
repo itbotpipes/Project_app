@@ -65,6 +65,12 @@ model Employee {
   scoresReceived ManagerScore[] @relation("ScoreReceived")
   scoresGiven    ManagerScore[] @relation("ScoreGiven")
   yearlyReviews  YearlyReview[]
+  behaviourReviews BehaviourReview[] @relation("BehaviourOf")
+  behaviourGiven   BehaviourReview[] @relation("BehaviourBy")
+  reactions        AnnouncementReaction[]
+  announcementComments AnnouncementComment[]
+  birthdayWishesReceived BirthdayWish[] @relation("WishFor")
+  birthdayWishesGiven    BirthdayWish[] @relation("WishFrom")
 }
 
 // ---------------------------------------------------------------------------
@@ -120,6 +126,46 @@ model Announcement {
   authorId  String?
   author    Employee? @relation(fields: [authorId], references: [id])
   createdAt DateTime @default(now())
+
+  reactions AnnouncementReaction[]
+  comments  AnnouncementComment[]
+}
+
+// Emoji / like reaction on an announcement (incl. the Thought of the day)
+model AnnouncementReaction {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee     @relation(fields: [employeeId], references: [id])
+  emoji          String       @default("👍")
+  createdAt      DateTime     @default(now())
+
+  @@unique([announcementId, employeeId, emoji])
+}
+
+// Comment thread on an announcement (incl. the Thought of the day)
+model AnnouncementComment {
+  id             String       @id @default(cuid())
+  announcementId String
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  employeeId     String
+  employee       Employee     @relation(fields: [employeeId], references: [id])
+  body           String
+  createdAt      DateTime     @default(now())
+}
+
+// A birthday wish addressed to an employee; can @-tag other employees
+model BirthdayWish {
+  id           String   @id @default(cuid())
+  forId        String
+  forEmployee  Employee @relation("WishFor", fields: [forId], references: [id])
+  fromId       String
+  fromEmployee Employee @relation("WishFrom", fields: [fromId], references: [id])
+  body         String
+  taggedIds    String?  // JSON array of tagged employee ids
+  year         Int      // the birthday-year this wish belongs to
+  createdAt    DateTime @default(now())
 }
 
 // ---------------------------------------------------------------------------
@@ -181,12 +227,35 @@ model YearlyReview {
   employeeId        String
   employee          Employee @relation(fields: [employeeId], references: [id])
   year              Int
-  behaviourScore    Float?   // 0-100, manager-assessed
+  behaviourScore    Float?   // 0-100, manager-assessed (legacy; now derived from BehaviourReview)
   targetAchievedPct Float?   // 0-100, target vs actual
   note              String?
   updatedAt         DateTime @updatedAt
 
   @@unique([employeeId, year])
+}
+
+// Human behaviour assessment — always filled in by HOD / HR / COO (never auto).
+// Six aspects, each scored 0-10. Aggregates into the 5% behaviour slice of the
+// increment. Kept monthly so it can be reviewed alongside the monthly scorecard.
+model BehaviourReview {
+  id          String   @id @default(cuid())
+  employeeId  String
+  employee    Employee @relation("BehaviourOf", fields: [employeeId], references: [id])
+  ratedById   String?
+  ratedBy     Employee? @relation("BehaviourBy", fields: [ratedById], references: [id])
+  year        Int
+  month       Int      // 1-12
+  attendance  Float    @default(0) // Attendance & availability
+  punctuality Float    @default(0) // Punctuality & discipline
+  learning    Float    @default(0) // Continuous learning & upskilling
+  helpfulness Float    @default(0) // Helpfulness & teamwork
+  trust       Float    @default(0) // Company trust & long-term commitment
+  conduct     Float    @default(0) // Cordial & positive conduct
+  note        String?
+  updatedAt   DateTime @updatedAt
+
+  @@unique([employeeId, year, month])
 }
 
 // ---------------------------------------------------------------------------

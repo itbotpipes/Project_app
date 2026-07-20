@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/db";
 import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
 import { computeAutoScores } from "@/lib/autoscore";
+import { BEHAVIOUR_ASPECTS } from "@/lib/behaviour";
 
 async function canScore(raterId: string, employeeId: string) {
   const rater = await prisma.employee.findUnique({ where: { id: raterId }, include: { role: true } });
@@ -102,6 +103,47 @@ export async function saveYearlyReview(formData: FormData) {
     create: { employeeId, year, behaviourScore, targetAchievedPct },
     update: { behaviourScore, targetAchievedPct },
   });
+  revalidatePath("/scores");
+  revalidatePath("/performance");
+  return { ok: true };
+}
+
+/**
+ * Save the human behaviour review (6 aspects, each 0–10) for a given month.
+ * Manual only — HOD / HR / COO. Feeds the 5% behaviour slice of the increment.
+ */
+export async function saveBehaviourReview(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not signed in" };
+  const employeeId = String(formData.get("employeeId") || "");
+  const year = Number(formData.get("year"));
+  const month = Number(formData.get("month"));
+  if (!employeeId || !year || !month) return { error: "Missing fields" };
+  if (!(await canScore(user.id, employeeId))) return { error: "Not authorized" };
+
+  const clamp10 = (v: FormDataEntryValue | null) =>
+    Math.max(0, Math.min(10, Number(v ?? 0) || 0));
+  const data = Object.fromEntries(
+    BEHAVIOUR_ASPECTS.map((a) => [a.key, clamp10(formData.get(a.key))]),
+  ) as Record<(typeof BEHAVIOUR_ASPECTS)[number]["key"], number>;
+  const note = String(formData.get("behaviourNote") || "") || null;
+
+  await prisma.behaviourReview.upsert({
+    where: { employeeId_year_month: { employeeId, year, month } },
+    create: { employeeId, year, month, ratedById: user.id, note, ...data },
+    update: { ratedById: user.id, note, ...data },
+  });
+
+  await prisma.auditLog.create({
+    data: {
+      actorId: user.id,
+      action: "behaviour.save",
+      entity: "BehaviourReview",
+      entityId: employeeId,
+      detail: `${year}-${month} behaviour by ${user.name}`,
+    },
+  });
+
   revalidatePath("/scores");
   revalidatePath("/performance");
   return { ok: true };

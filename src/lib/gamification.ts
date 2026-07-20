@@ -35,20 +35,20 @@ export function streakBadges(streak: number): Badge[] {
 }
 
 /** Upcoming birthdays within `withinDays` (ignores year). */
-export function upcomingBirthdays<T extends { name: string; birthday: Date | null }>(
+export function upcomingBirthdays<T extends { id?: string; name: string; birthday: Date | null }>(
   people: T[],
   withinDays = 14,
-): { name: string; date: Date; inDays: number }[] {
+): { id: string; name: string; date: Date; inDays: number }[] {
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const out: { name: string; date: Date; inDays: number }[] = [];
+  const out: { id: string; name: string; date: Date; inDays: number }[] = [];
   for (const p of people) {
     if (!p.birthday) continue;
     const b = new Date(p.birthday);
     const next = new Date(today.getFullYear(), b.getMonth(), b.getDate());
     if (next < today) next.setFullYear(today.getFullYear() + 1);
     const inDays = Math.round((next.getTime() - today.getTime()) / 86400000);
-    if (inDays <= withinDays) out.push({ name: p.name, date: next, inDays });
+    if (inDays <= withinDays) out.push({ id: p.id ?? "", name: p.name, date: next, inDays });
   }
   return out.sort((a, b) => a.inDays - b.inDays);
 }

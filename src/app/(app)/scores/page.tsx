@@ -32,7 +32,7 @@ export default async function ScoresPage({
   });
   const empIds = employees.map((e) => e.id);
 
-  const [kpiTemplates, existingScores, tasks, reviews] = await Promise.all([
+  const [kpiTemplates, existingScores, tasks, reviews, behaviourReviews] = await Promise.all([
     prisma.kpiTemplate.findMany({
       where: { roleId: { in: [...new Set(employees.map((e) => e.roleId))] } },
       orderBy: { orderIndex: "asc" },
@@ -43,6 +43,7 @@ export default async function ScoresPage({
       select: { assigneeId: true, kpiTemplateId: true, status: true, createdAt: true, completedAt: true, carryCount: true },
     }),
     prisma.yearlyReview.findMany({ where: { employeeId: { in: empIds }, year } }),
+    prisma.behaviourReview.findMany({ where: { employeeId: { in: empIds }, year, month } }),
   ]);
 
   const kpisByRole = new Map<string, typeof kpiTemplates>();
@@ -60,6 +61,7 @@ export default async function ScoresPage({
   const scoreKey = (e: string, k: string) => `${e}|${k}`;
   const scoreMap = new Map(existingScores.map((s) => [scoreKey(s.employeeId, s.kpiTemplateId), s]));
   const reviewMap = new Map(reviews.map((r) => [r.employeeId, r]));
+  const behaviourMap = new Map(behaviourReviews.map((b) => [b.employeeId, b]));
 
   const byDept = new Map<string, typeof employees>();
   for (const e of employees) {
@@ -128,6 +130,7 @@ export default async function ScoresPage({
               const finalTotal = rows.reduce((s, r) => s + (r.current ?? r.auto), 0);
               const anySaved = rows.some((r) => r.saved);
               const review = reviewMap.get(e.id);
+              const bh = behaviourMap.get(e.id);
 
               return (
                 <details key={e.id} className="rounded-xl border border-slate-200">
@@ -159,7 +162,19 @@ export default async function ScoresPage({
                       year={year}
                       month={month}
                       rows={rows}
-                      behaviourScore={review?.behaviourScore ?? null}
+                      behaviour={
+                        bh
+                          ? {
+                              attendance: bh.attendance,
+                              punctuality: bh.punctuality,
+                              learning: bh.learning,
+                              helpfulness: bh.helpfulness,
+                              trust: bh.trust,
+                              conduct: bh.conduct,
+                              note: bh.note,
+                            }
+                          : null
+                      }
                       targetAchievedPct={review?.targetAchievedPct ?? null}
                     />
                   </div>

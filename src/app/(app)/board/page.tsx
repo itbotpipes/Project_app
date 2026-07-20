@@ -6,6 +6,7 @@ import { mondayOf } from "@/lib/date";
 import { cn } from "@/lib/cn";
 import { Card, SectionTitle } from "../_components/ui";
 import BucketFill from "../_components/BucketFill";
+import AutoRefresh from "../_components/AutoRefresh";
 import NewTaskDialog from "./NewTaskDialog";
 import KanbanBoard from "./KanbanBoard";
 
@@ -120,25 +121,31 @@ export default async function BoardPage({
       <Card>
         <SectionTitle
           action={
-            <div className="flex gap-1 text-xs">
-              {(["today", "week", "month"] as const).map((p) => (
-                <Link
-                  key={p}
-                  href={`/board?period=${p}`}
-                  className={cn(
-                    "rounded-full px-2.5 py-1 font-medium capitalize",
-                    period === p ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
-                  )}
-                >
-                  {p}
-                </Link>
-              ))}
+            <div className="flex items-center gap-2 text-xs">
+              <AutoRefresh seconds={20} />
+              <div className="flex gap-1">
+                {(["today", "week", "month"] as const).map((p) => (
+                  <Link
+                    key={p}
+                    href={`/board?period=${p}`}
+                    className={cn(
+                      "rounded-full px-2.5 py-1 font-medium capitalize",
+                      period === p ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-600 hover:bg-slate-200",
+                    )}
+                  >
+                    {p}
+                  </Link>
+                ))}
+              </div>
             </div>
           }
         >
-          🪣 KPI buckets — {period === "today" ? "today" : period === "week" ? "this week" : "this month"}
+          🔥 KPI fire-pipes — {period === "today" ? "today" : period === "week" ? "this week" : "this month"}
         </SectionTitle>
         <BucketFill buckets={bucketData} />
+        <p className="mt-3 text-[11px] text-slate-400">
+          Each red pipe is one of your KPIs. Water rises as work flows through it — updates live as tasks move.
+        </p>
       </Card>
 
       {imbalance && (

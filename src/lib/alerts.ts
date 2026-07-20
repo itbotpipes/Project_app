@@ -117,7 +117,58 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
           href: "/team",
           text: `⚠ ${teamStale.length} team member(s) have tasks on hold 96h+ — escalated to you`,
         });
+
+      // Monthly scoring cadence: finalise LAST month's scores by the 5th.
+      const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+      const py = prevStart.getFullYear();
+      const pm = prevStart.getMonth() + 1;
+      const prevCards = await prisma.monthlyScorecard.findMany({
+        where: { employeeId: { in: reportIds }, year: py, month: pm },
+        select: { employeeId: true, source: true },
+      });
+      const finalized = new Set(prevCards.filter((c) => c.source !== "auto").map((c) => c.employeeId));
+      const pending = reportIds.filter((id) => !finalized.has(id)).length;
+      const monthName = prevStart.toLocaleDateString("en-IN", { month: "long" });
+      if (pending > 0) {
+        if (now.getDate() <= 5) {
+          alerts.push({
+            id: "score-due",
+            tone: "amber",
+            href: "/scores",
+            text: `Finalise ${pending} ${monthName} scorecard(s) before the 5th`,
+          });
+        } else {
+          alerts.push({
+            id: "score-overdue",
+            tone: "red",
+            href: "/scores",
+            text: `⚠ ${pending} ${monthName} scorecard(s) not finalised — overdue (was due the 5th)`,
+          });
+        }
+      }
     }
+  }
+
+  // Company-wide escalation (Admin / CEO): after the 5th, flag anyone still not finalised.
+  if ((user.systemRole === "ADMIN" || user.systemRole === "CEO") && now.getDate() > 5) {
+    const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const py = prevStart.getFullYear();
+    const pm = prevStart.getMonth() + 1;
+    const monthName = prevStart.toLocaleDateString("en-IN", { month: "long" });
+    const activeIds = (await prisma.employee.findMany({ where: { active: true }, select: { id: true } })).map((e) => e.id);
+    const cards = await prisma.monthlyScorecard.findMany({
+      where: { employeeId: { in: activeIds }, year: py, month: pm },
+      select: { employeeId: true, source: true },
+    });
+    const finalized = new Set(cards.filter((c) => c.source !== "auto").map((c) => c.employeeId));
+    const pending = activeIds.filter((id) => !finalized.has(id)).length;
+    if (pending > 0)
+      alerts.push({
+        id: "score-escalation",
+        tone: "red",
+        href: "/scores",
+        text: `⚠ ${pending} employee scorecard(s) for ${monthName} still not finalised across the company`,
+      });
   }
 
   return alerts;

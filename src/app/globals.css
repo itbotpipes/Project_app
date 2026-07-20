@@ -40,6 +40,36 @@ html {
 .animate-overlayFade { animation: overlayFade 3.6s ease-in forwards; }
 .animate-confetti { animation: confettiFall linear forwards; }
 
+/* ── Fire-pipe water buckets ─────────────────────────────────────── */
+/* the wavy top surface of the water slides sideways forever */
+@keyframes waterWave {
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
+}
+/* gentle bob of the whole water column so the level "breathes" */
+@keyframes waterBob {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-2px); }
+}
+/* bubbles rise from the bottom of the pipe and fade near the surface */
+@keyframes bubbleRise {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  20%  { opacity: 0.9; }
+  100% { transform: translateY(-42px) scale(1); opacity: 0; }
+}
+/* a highlight sheen breathing on the glossy red pipe */
+@keyframes pipeSheen {
+  0%, 100% { opacity: 0.15; }
+  50%      { opacity: 0.45; }
+}
+.animate-waterWave { animation: waterWave 2.8s linear infinite; }
+.animate-waterBob  { animation: waterBob 3.2s ease-in-out infinite; }
+.animate-bubble    { animation: bubbleRise 2.6s ease-in infinite; }
+.animate-pipeSheen { animation: pipeSheen 3.5s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .animate-waterWave, .animate-waterBob, .animate-bubble, .animate-pipeSheen { animation: none; }
+}
+
 /* thin scrollbars for the Kanban lanes */
 .scroll-thin::-webkit-scrollbar {
   height: 8px;

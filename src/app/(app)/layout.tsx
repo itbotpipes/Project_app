@@ -31,8 +31,10 @@ export default async function AppLayout({
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img src="/logo-mark.svg" alt="Northern Star Engineering" className="h-9 w-9" />
           <div className="leading-tight">
-            <div className="text-sm font-semibold">Northern Star</div>
-            <div className="text-[11px] text-slate-500">Engineering</div>
+            <div className="text-sm font-semibold">
+              Task<span className="text-blue-600">Flow</span>
+            </div>
+            <div className="text-[11px] text-slate-500">Northern Star Engineering</div>
           </div>
         </div>
         <Sidebar
@@ -45,7 +47,9 @@ export default async function AppLayout({
       {/* Main */}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
-          <div className="text-sm text-slate-500 md:hidden">Northern Star Ops</div>
+          <div className="text-sm font-semibold text-slate-700 md:hidden">
+            Task<span className="text-blue-600">Flow</span>
+          </div>
           <div className="ml-auto flex items-center gap-3">
             <NotificationBell alerts={alerts} />
             <div className="text-right leading-tight">

@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { saveMonthlyScorecard, saveYearlyReview } from "@/lib/actions/scores";
+import { saveMonthlyScorecard, saveYearlyReview, saveBehaviourReview } from "@/lib/actions/scores";
+import { BEHAVIOUR_ASPECTS, behaviourAverage, type BehaviourKey } from "@/lib/behaviour";
 
 type Row = {
   id: string;
@@ -14,13 +15,15 @@ type Row = {
   saved: boolean;
 };
 
+type BehaviourInput = Record<BehaviourKey, number> & { note: string | null };
+
 export default function KpiScoreEditor({
   employeeId,
   employeeName,
   year,
   month,
   rows,
-  behaviourScore,
+  behaviour,
   targetAchievedPct,
 }: {
   employeeId: string;
@@ -28,9 +31,18 @@ export default function KpiScoreEditor({
   year: number;
   month: number;
   rows: Row[];
-  behaviourScore: number | null;
+  behaviour: BehaviourInput | null;
   targetAchievedPct: number | null;
 }) {
+  const [beh, setBeh] = useState<Record<BehaviourKey, string>>(
+    Object.fromEntries(
+      BEHAVIOUR_ASPECTS.map((a) => [a.key, behaviour ? String(behaviour[a.key]) : "0"]),
+    ) as Record<BehaviourKey, string>,
+  );
+  const [behMsg, setBehMsg] = useState<string | null>(null);
+  const behAvg = behaviourAverage(
+    Object.fromEntries(BEHAVIOUR_ASPECTS.map((a) => [a.key, Number(beh[a.key]) || 0])) as Record<BehaviourKey, number>,
+  );
   // controlled final values (default: saved value, else the system auto value)
   const [vals, setVals] = useState<Record<string, string>>(
     Object.fromEntries(rows.map((r) => [r.id, String(r.current ?? r.auto)])),
@@ -128,7 +140,76 @@ export default function KpiScoreEditor({
         </div>
       </form>
 
-      {/* Annual inputs feeding the increment projection */}
+      {/* Behaviour review — 6 human-judged aspects, always manual (HOD / HR / COO) */}
+      <form
+        action={async (fd) => {
+          const res = await saveBehaviourReview(fd);
+          setBehMsg(res?.error ? res.error : "✓ Saved");
+          setTimeout(() => setBehMsg(null), 2500);
+        }}
+        className="rounded-lg border border-amber-200 bg-amber-50/60 p-3"
+      >
+        <input type="hidden" name="employeeId" value={employeeId} />
+        <input type="hidden" name="year" value={year} />
+        <input type="hidden" name="month" value={month} />
+        <div className="mb-2 flex items-center justify-between">
+          <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">
+            Behaviour review · {monthName(month)} {year}
+          </div>
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title="Average of the 6 aspects, out of 10">
+            Avg {behAvg.toFixed(1)}/10
+          </span>
+        </div>
+        <p className="mb-2 text-[11px] text-amber-700/80">
+          Judged by you (HOD / HR / COO) — cannot be auto-scored. Feeds the 5% behaviour slice of the increment.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          {BEHAVIOUR_ASPECTS.map((a) => (
+            <label key={a.key} className="flex items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-sm">
+              <span className="text-slate-700">
+                <span className="mr-1">{a.icon}</span>
+                {a.label}
+              </span>
+              <span className="flex items-center gap-2">
+                <input
+                  type="range"
+                  min="0"
+                  max="10"
+                  step="1"
+                  value={beh[a.key]}
+                  onChange={(e) => setBeh((v) => ({ ...v, [a.key]: e.target.value }))}
+                  className="w-24 accent-amber-500"
+                />
+                <input
+                  name={a.key}
+                  type="number"
+                  min="0"
+                  max="10"
+                  step="0.5"
+                  value={beh[a.key]}
+                  onChange={(e) => setBeh((v) => ({ ...v, [a.key]: e.target.value }))}
+                  className="w-14 rounded-md border border-slate-300 px-1.5 py-0.5 text-right text-sm"
+                />
+              </span>
+            </label>
+          ))}
+        </div>
+        <textarea
+          name="behaviourNote"
+          rows={2}
+          defaultValue={behaviour?.note ?? ""}
+          placeholder="Optional note (e.g. missed 2 days, mentored a junior…)"
+          className="mt-2 w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm"
+        />
+        <div className="mt-2 flex items-center gap-3">
+          <button className="rounded-lg bg-amber-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-amber-700">
+            Save behaviour
+          </button>
+          {behMsg && <span className="text-xs text-emerald-600">{behMsg}</span>}
+        </div>
+      </form>
+
+      {/* Annual target-vs-actual — the 10% slice of the increment */}
       <form
         action={async (fd) => {
           const res = await saveYearlyReview(fd);
@@ -140,21 +221,9 @@ export default function KpiScoreEditor({
         <input type="hidden" name="employeeId" value={employeeId} />
         <input type="hidden" name="year" value={year} />
         <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
-          Annual review — feeds {employeeName.split(" ")[0]}&apos;s increment ({year})
+          Annual target — feeds {employeeName.split(" ")[0]}&apos;s increment ({year})
         </div>
         <div className="flex flex-wrap items-end gap-4">
-          <label className="text-xs font-medium text-slate-600">
-            Behaviour (0–100)
-            <input
-              name="behaviourScore"
-              type="number"
-              min="0"
-              max="100"
-              defaultValue={behaviourScore ?? ""}
-              placeholder="—"
-              className="mt-1 block w-24 rounded-md border border-slate-300 px-2 py-1 text-sm"
-            />
-          </label>
           <label className="text-xs font-medium text-slate-600">
             Target achieved % (0–100)
             <input
@@ -168,11 +237,15 @@ export default function KpiScoreEditor({
             />
           </label>
           <button className="rounded-lg bg-slate-700 px-3 py-1.5 text-sm font-medium text-white hover:bg-slate-800">
-            Save annual
+            Save target
           </button>
           {reviewMsg && <span className="text-xs text-emerald-600">{reviewMsg}</span>}
         </div>
       </form>
     </div>
   );
+}
+
+function monthName(m: number) {
+  return ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][m - 1] ?? String(m);
 }

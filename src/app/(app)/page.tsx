@@ -9,6 +9,9 @@ import { Card, StatCard, SectionTitle, Badge } from "./_components/ui";
 import { DualTrendLine } from "./_components/Charts";
 import Celebration from "./_components/Celebration";
 import RitualBanners from "./_components/RitualBanners";
+import ThoughtSocial from "./_components/ThoughtSocial";
+import BirthdayWishes from "./_components/BirthdayWishes";
+import { relativeTime } from "@/lib/date";
 
 export default async function Dashboard() {
   const user = await getCurrentUser();
@@ -77,15 +80,69 @@ export default async function Dashboard() {
   const announcements = await prisma.announcement.findMany({
     orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
     take: 6,
-    include: { author: true },
+    include: {
+      author: true,
+      reactions: true,
+      comments: { include: { employee: { select: { name: true } } }, orderBy: { createdAt: "asc" } },
+    },
   });
   const thought = announcements.find((a) => a.kind === "THOUGHT");
   const notices = announcements.filter((a) => a.kind !== "THOUGHT");
+
+  // reaction summary + comments for the thought card
+  const thoughtReactions = thought
+    ? (() => {
+        const m = new Map<string, { count: number; mine: boolean }>();
+        for (const r of thought.reactions) {
+          const e = m.get(r.emoji) ?? { count: 0, mine: false };
+          e.count++;
+          if (r.employeeId === user.id) e.mine = true;
+          m.set(r.emoji, e);
+        }
+        return [...m.entries()].map(([emoji, v]) => ({ emoji, ...v }));
+      })()
+    : [];
+  const thoughtComments = thought
+    ? thought.comments.map((c) => ({
+        id: c.id,
+        author: c.employee.name,
+        body: c.body,
+        when: relativeTime(c.createdAt),
+        canDelete: c.employeeId === user.id || scorer,
+      }))
+    : [];
+
   const bdayPeople = await prisma.employee.findMany({
     where: { active: true, birthday: { not: null } },
-    select: { name: true, birthday: true },
+    select: { id: true, name: true, birthday: true },
   });
   const birthdays = upcomingBirthdays(bdayPeople, 21).slice(0, 4);
+
+  // people I can @-tag in a birthday wish + this year's wishes for upcoming birthday folks
+  const allPeople = await prisma.employee.findMany({
+    where: { active: true },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  const nowYear2 = new Date().getFullYear();
+  // wish the nearest upcoming birthday (today or soon), if any
+  const wishTarget = birthdays[0] ?? null;
+  const wishesRaw = wishTarget
+    ? await prisma.birthdayWish.findMany({
+        where: { forId: wishTarget.id, year: nowYear2 },
+        include: { fromEmployee: { select: { name: true } } },
+        orderBy: { createdAt: "desc" },
+        take: 12,
+      })
+    : [];
+  const nameById = new Map(allPeople.map((p) => [p.id, p.name]));
+  const wishes = wishesRaw.map((w) => ({
+    id: w.id,
+    from: w.fromEmployee.name,
+    body: w.body,
+    tagged: w.taggedIds ? (JSON.parse(w.taggedIds) as string[]).map((id) => nameById.get(id) ?? "") .filter(Boolean) : [],
+    when: relativeTime(w.createdAt),
+  }));
 
   // Star of the month — latest period across the company
   const latestPeriod = await prisma.monthlyScorecard.findFirst({
@@ -207,6 +264,13 @@ export default async function Dashboard() {
                 ))}
               </ul>
             )}
+            {thought && (
+              <ThoughtSocial
+                announcementId={thought.id}
+                reactions={thoughtReactions}
+                comments={thoughtComments}
+              />
+            )}
           </Card>
         )}
         <Card>
@@ -222,6 +286,15 @@ export default async function Dashboard() {
             ))}
             {!birthdays.length && <li className="text-sm text-slate-400">None in the next 3 weeks.</li>}
           </ul>
+          {wishTarget && wishTarget.id && (
+            <BirthdayWishes
+              target={{ id: wishTarget.id, name: wishTarget.name }}
+              inDays={wishTarget.inDays}
+              people={allPeople}
+              wishes={wishes}
+              selfId={user.id}
+            />
+          )}
         </Card>
       </div>
 

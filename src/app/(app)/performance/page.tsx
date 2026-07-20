@@ -2,6 +2,7 @@ import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
+import { behaviourPct, behaviourPctFromMany } from "@/lib/behaviour";
 import { Card, StatCard, SectionTitle, Badge } from "../_components/ui";
 import { DualTrendLine, Donut, Legend, ScoreBars, IncrementBar } from "../_components/Charts";
 import BucketFill from "../_components/BucketFill";
@@ -35,18 +36,40 @@ export default async function PerformancePage() {
   const band = incrementBand(avg);
   const ready = readiness(avg);
 
-  // Annual increment projection (behaviour + target from the manager's yearly review)
+  // Annual increment projection (behaviour from HOD/HR/COO reviews + target from yearly review)
   const nowYear = new Date().getFullYear();
-  const review = await prisma.yearlyReview.findUnique({
-    where: { employeeId_year: { employeeId: user.id, year: nowYear } },
-  });
+  const [review, behaviourAll] = await Promise.all([
+    prisma.yearlyReview.findUnique({
+      where: { employeeId_year: { employeeId: user.id, year: nowYear } },
+    }),
+    prisma.behaviourReview.findMany({
+      where: { employeeId: user.id },
+      orderBy: [{ year: "desc" }, { month: "desc" }],
+    }),
+  ]);
+  const behaviourThisYear = behaviourAll.filter((b) => b.year === nowYear);
+  const behaviourYearPct = behaviourPctFromMany(behaviourThisYear); // 0-100 or null
+  const behaviourByMonth = new Map(behaviourAll.map((b) => [`${b.year}-${b.month}`, b]));
+
   const kpiComponent = Math.round((Math.min(100, avg) / 100) * 5 * 10) / 10; // max 5%
   const behaviourComponent =
-    review?.behaviourScore != null ? Math.round((review.behaviourScore / 100) * 5 * 10) / 10 : null; // max 5%
+    behaviourYearPct != null ? Math.round((behaviourYearPct / 100) * 5 * 10) / 10 : null; // max 5%
   const targetComponent =
     review?.targetAchievedPct != null ? Math.round((review.targetAchievedPct / 100) * 10 * 10) / 10 : null; // max 10%
   const incrementTotal =
     kpiComponent + (behaviourComponent ?? 0) + (targetComponent ?? 0);
+
+  // Monthly score history (newest first) — visible to the employee themselves
+  const history = [...myCards].reverse().map((c) => {
+    const bh = behaviourByMonth.get(`${c.year}-${c.month}`);
+    return {
+      key: `${c.year}-${c.month}`,
+      label: monthLabel(c.year, c.month),
+      auto: c.autoTotal,
+      total: c.total,
+      behaviour: bh ? behaviourPct(bh) / 10 : null, // out of 10
+    };
+  });
 
   const myKpis = await prisma.kpiTemplate.findMany({
     where: { roleId: user.roleId },
@@ -143,7 +166,43 @@ export default async function PerformancePage() {
       </div>
 
       <Card>
-        <SectionTitle>🪣 What I&apos;ve actually worked on this month</SectionTitle>
+        <SectionTitle>📅 Monthly score history</SectionTitle>
+        {history.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
+                  <th className="pb-1 font-medium">Month</th>
+                  <th className="pb-1 text-center font-medium">Auto</th>
+                  <th className="pb-1 text-center font-medium">Final</th>
+                  <th className="pb-1 text-center font-medium">Behaviour</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {history.map((h) => (
+                  <tr key={h.key}>
+                    <td className="py-1.5 font-medium text-slate-700">{h.label}</td>
+                    <td className="py-1.5 text-center text-blue-600">{h.auto ? Math.round(h.auto) : "—"}</td>
+                    <td className="py-1.5 text-center font-semibold text-violet-700">{Math.round(h.total)}</td>
+                    <td className="py-1.5 text-center text-amber-700">
+                      {h.behaviour != null ? `${h.behaviour.toFixed(1)}/10` : "—"}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <p className="text-sm text-slate-400">No monthly scores recorded yet.</p>
+        )}
+        <p className="mt-3 text-xs text-slate-500">
+          Every month is kept on record — this is your full journey. On the 1st you can see the
+          previous month&apos;s auto scores; your manager finalises them by the 5th.
+        </p>
+      </Card>
+
+      <Card>
+        <SectionTitle>🔥 What I&apos;ve actually worked on this month</SectionTitle>
         <BucketFill buckets={bucketFillData} />
       </Card>
 
