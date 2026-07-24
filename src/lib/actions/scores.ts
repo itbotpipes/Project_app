@@ -1,25 +1,30 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase/admin";
 import { computeAutoScores } from "@/lib/autoscore";
 import { BEHAVIOUR_ASPECTS } from "@/lib/behaviour";
 
 async function canScore(raterId: string, employeeId: string) {
-  const rater = await prisma.employee.findUnique({ where: { id: raterId }, include: { role: true } });
-  if (!rater) return false;
-  if (canScoreCompanyWide(rater)) return true;
+  const raterDoc = await adminDb.collection("Employee").doc(raterId).get();
+  if (!raterDoc.exists) return false;
+  const rater = raterDoc.data()!;
+
+  let roleData: any = null;
+  if (rater.roleId) {
+    const roleDoc = await adminDb.collection("Role").doc(rater.roleId).get();
+    if (roleDoc.exists) roleData = roleDoc.data();
+  }
+
+  const raterWithRole = { ...rater, role: roleData };
+  if (canScoreCompanyWide(raterWithRole as any)) return true;
   if (!isManagerLike(rater.systemRole)) return false;
-  const target = await prisma.employee.findUnique({ where: { id: employeeId } });
-  return target?.reportsToId === raterId;
+
+  const targetDoc = await adminDb.collection("Employee").doc(employeeId).get();
+  return targetDoc.exists && targetDoc.data()!.reportsToId === raterId;
 }
 
-/**
- * Save a monthly KRA scorecard for an employee.
- * Recomputes each KPI's auto score server-side (integrity), stores the manager's
- * final value per KPI (defaulting to auto if left blank), and rolls up both totals.
- */
 export async function saveMonthlyScorecard(formData: FormData) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
@@ -30,18 +35,38 @@ export async function saveMonthlyScorecard(formData: FormData) {
   if (!employeeId || !year || !month) return { error: "Missing fields" };
   if (!(await canScore(user.id, employeeId))) return { error: "Not authorized" };
 
-  const employee = await prisma.employee.findUnique({ where: { id: employeeId } });
-  if (!employee) return { error: "No such employee" };
+  const employeeDoc = await adminDb.collection("Employee").doc(employeeId).get();
+  if (!employeeDoc.exists) return { error: "No such employee" };
+  const employee = employeeDoc.data()!;
 
-  const kpis = await prisma.kpiTemplate.findMany({ where: { roleId: employee.roleId } });
+  const kpisSnap = await adminDb.collection("KpiTemplate").where("roleId", "==", employee.roleId).get();
+  const kpis = kpisSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
 
-  // recompute auto scores for this month
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 1);
-  const tasks = await prisma.task.findMany({
-    where: { assigneeId: employeeId, createdAt: { gte: monthStart, lt: monthEnd } },
-    select: { kpiTemplateId: true, status: true, createdAt: true, completedAt: true, carryCount: true },
+  const tasksSnap = await adminDb.collection("Task")
+    .where("assigneeId", "==", employeeId)
+    .get();
+  // Filter date range in JS — no composite index needed
+  const monthStartMs = monthStart.getTime();
+  const monthEndMs = monthEnd.getTime();
+  const tasks = tasksSnap.docs
+    .filter((d) => {
+      const raw = d.data().createdAt;
+      const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+      return createdAt.getTime() >= monthStartMs && createdAt.getTime() < monthEndMs;
+    })
+    .map((d) => {
+    const t = d.data();
+    return {
+      kpiTemplateId: t.kpiTemplateId,
+      status: t.status,
+      createdAt: t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt),
+      completedAt: t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
+      carryCount: t.carryCount ?? 0,
+    };
   });
+
   const auto = computeAutoScores(kpis.map((k) => ({ id: k.id, weightage: k.weightage })), tasks);
 
   let total = 0;
@@ -50,31 +75,48 @@ export async function saveMonthlyScorecard(formData: FormData) {
     const a = auto.get(k.id)?.auto ?? 0;
     autoTotal += a;
     const raw = formData.get(`kpi_${k.id}`);
-    // blank field = accept the system auto value
     const finalScore = raw != null && raw !== "" ? Number(raw) : a;
     const clamped = Math.max(0, Math.min(finalScore, k.weightage));
     total += clamped;
-    await prisma.monthlyScore.upsert({
-      where: { employeeId_kpiTemplateId_year_month: { employeeId, kpiTemplateId: k.id, year, month } },
-      create: { employeeId, kpiTemplateId: k.id, year, month, autoScore: a, score: clamped },
-      update: { autoScore: a, score: clamped },
-    });
+
+    // Upsert MonthlyScore
+    const scoreSnap = await adminDb.collection("MonthlyScore")
+      .where("employeeId", "==", employeeId)
+      .where("kpiTemplateId", "==", k.id)
+      .where("year", "==", year)
+      .where("month", "==", month)
+      .limit(1)
+      .get();
+
+    if (!scoreSnap.empty) {
+      await adminDb.collection("MonthlyScore").doc(scoreSnap.docs[0].id).update({ autoScore: a, score: clamped });
+    } else {
+      await adminDb.collection("MonthlyScore").add({ employeeId, kpiTemplateId: k.id, year, month, autoScore: a, score: clamped });
+    }
   }
 
-  await prisma.monthlyScorecard.upsert({
-    where: { employeeId_year_month: { employeeId, year, month } },
-    create: { employeeId, year, month, total, autoTotal, source: "computed" },
-    update: { total, autoTotal, source: "computed" },
-  });
+  // Upsert MonthlyScorecard
+  const cardSnap = await adminDb.collection("MonthlyScorecard")
+    .where("employeeId", "==", employeeId)
+    .where("year", "==", year)
+    .where("month", "==", month)
+    .limit(1)
+    .get();
 
-  await prisma.auditLog.create({
-    data: {
-      actorId: user.id,
-      action: "score.save",
-      entity: "MonthlyScorecard",
-      entityId: employeeId,
-      detail: `${year}-${month} total ${total.toFixed(1)} (auto ${autoTotal.toFixed(1)})`,
-    },
+  const cardData = { employeeId, year, month, total, autoTotal, source: "computed", updatedAt: new Date() };
+  if (!cardSnap.empty) {
+    await adminDb.collection("MonthlyScorecard").doc(cardSnap.docs[0].id).update(cardData);
+  } else {
+    await adminDb.collection("MonthlyScorecard").add({ ...cardData, locked: false });
+  }
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "score.save",
+    entity: "MonthlyScorecard",
+    entityId: employeeId,
+    detail: `${year}-${month} total ${total.toFixed(1)} (auto ${autoTotal.toFixed(1)})`,
+    createdAt: new Date(),
   });
 
   revalidatePath("/scores");
@@ -84,7 +126,6 @@ export async function saveMonthlyScorecard(formData: FormData) {
   return { ok: true };
 }
 
-/** Manager/admin sets the annual behaviour + target-achievement inputs for the increment projection. */
 export async function saveYearlyReview(formData: FormData) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
@@ -98,20 +139,24 @@ export async function saveYearlyReview(formData: FormData) {
   const behaviourScore = clampPct(formData.get("behaviourScore"));
   const targetAchievedPct = clampPct(formData.get("targetAchievedPct"));
 
-  await prisma.yearlyReview.upsert({
-    where: { employeeId_year: { employeeId, year } },
-    create: { employeeId, year, behaviourScore, targetAchievedPct },
-    update: { behaviourScore, targetAchievedPct },
-  });
+  const snap = await adminDb.collection("YearlyReview")
+    .where("employeeId", "==", employeeId)
+    .where("year", "==", year)
+    .limit(1)
+    .get();
+
+  const data = { employeeId, year, behaviourScore, targetAchievedPct, updatedAt: new Date() };
+  if (!snap.empty) {
+    await adminDb.collection("YearlyReview").doc(snap.docs[0].id).update(data);
+  } else {
+    await adminDb.collection("YearlyReview").add(data);
+  }
+
   revalidatePath("/scores");
   revalidatePath("/performance");
   return { ok: true };
 }
 
-/**
- * Save the human behaviour review (6 aspects, each 0–10) for a given month.
- * Manual only — HOD / HR / COO. Feeds the 5% behaviour slice of the increment.
- */
 export async function saveBehaviourReview(formData: FormData) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
@@ -123,25 +168,32 @@ export async function saveBehaviourReview(formData: FormData) {
 
   const clamp10 = (v: FormDataEntryValue | null) =>
     Math.max(0, Math.min(10, Number(v ?? 0) || 0));
-  const data = Object.fromEntries(
+  const aspectData = Object.fromEntries(
     BEHAVIOUR_ASPECTS.map((a) => [a.key, clamp10(formData.get(a.key))]),
-  ) as Record<(typeof BEHAVIOUR_ASPECTS)[number]["key"], number>;
+  ) as Record<string, number>;
   const note = String(formData.get("behaviourNote") || "") || null;
 
-  await prisma.behaviourReview.upsert({
-    where: { employeeId_year_month: { employeeId, year, month } },
-    create: { employeeId, year, month, ratedById: user.id, note, ...data },
-    update: { ratedById: user.id, note, ...data },
-  });
+  const snap = await adminDb.collection("BehaviourReview")
+    .where("employeeId", "==", employeeId)
+    .where("year", "==", year)
+    .where("month", "==", month)
+    .limit(1)
+    .get();
 
-  await prisma.auditLog.create({
-    data: {
-      actorId: user.id,
-      action: "behaviour.save",
-      entity: "BehaviourReview",
-      entityId: employeeId,
-      detail: `${year}-${month} behaviour by ${user.name}`,
-    },
+  const data = { employeeId, year, month, ratedById: user.id, note, ...aspectData, updatedAt: new Date() };
+  if (!snap.empty) {
+    await adminDb.collection("BehaviourReview").doc(snap.docs[0].id).update(data);
+  } else {
+    await adminDb.collection("BehaviourReview").add(data);
+  }
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "behaviour.save",
+    entity: "BehaviourReview",
+    entityId: employeeId,
+    detail: `${year}-${month} behaviour by ${user.name}`,
+    createdAt: new Date(),
   });
 
   revalidatePath("/scores");

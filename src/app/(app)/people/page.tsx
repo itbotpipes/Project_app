@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { Card, Badge } from "../_components/ui";
 import { monthLabel } from "@/lib/scores";
 
@@ -9,15 +10,40 @@ export default async function PeoplePage() {
   if (!user) return null;
   if (!isManagerLike(user.systemRole)) redirect("/");
 
-  const employees = await prisma.employee.findMany({
-    where: { active: true },
-    include: {
-      role: { include: { department: true } },
-      reportsTo: { select: { name: true } },
-      scorecards: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 1 },
-    },
-    orderBy: [{ role: { level: "asc" } }, { name: "asc" }],
-  });
+  const employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+
+  const employees = await Promise.all(
+    employeesSnap.docs.map(async (doc) => {
+      const emp = doc.data() as any;
+      let roleData: any = { title: "Unknown", department: null };
+      let reportsToName = "—";
+      let latestScorecard: any = null;
+
+      const [roleDoc, managerDoc, scorecardsSnap] = await Promise.all([
+        emp.roleId ? adminDb.collection("Role").doc(emp.roleId).get() : Promise.resolve(null),
+        emp.reportsToId ? adminDb.collection("Employee").doc(emp.reportsToId).get() : Promise.resolve(null),
+        adminDb.collection("MonthlyScorecard").where("employeeId", "==", doc.id).get(),
+      ]);
+
+      if (roleDoc?.exists) {
+        const role = roleDoc.data()!;
+        roleData.title = role.title;
+        if (role.departmentId) {
+          const deptDoc = await adminDb.collection("Department").doc(role.departmentId).get();
+          if (deptDoc.exists) roleData.department = { name: deptDoc.data()!.name };
+        }
+      }
+      if (managerDoc?.exists) reportsToName = managerDoc.data()!.name;
+      if (!scorecardsSnap.empty) {
+        // Sort in JS — no composite index needed
+        const sorted = scorecardsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
+        latestScorecard = sorted[0].data();
+      }
+
+      return { id: doc.id, ...emp, role: roleData, reportsTo: { name: reportsToName }, scorecards: latestScorecard ? [latestScorecard] : [] };
+    })
+  );
+  employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
 
   // group by department
   const byDept = new Map<string, typeof employees>();
@@ -48,6 +74,7 @@ export default async function PeoplePage() {
                   <th className="pb-2 font-medium">Role</th>
                   <th className="pb-2 font-medium">Reports to</th>
                   <th className="pb-2 font-medium text-right">Latest score</th>
+                  <th className="pb-2 font-medium text-right"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -55,7 +82,11 @@ export default async function PeoplePage() {
                   const s = e.scorecards[0];
                   return (
                     <tr key={e.id}>
-                      <td className="py-2 font-medium">{e.name}</td>
+                      <td className="py-2 font-medium">
+                        <Link href={`/people/${e.id}`} className="hover:text-blue-600 hover:underline">
+                          {e.name}
+                        </Link>
+                      </td>
                       <td className="py-2 text-slate-600">{e.role.title}</td>
                       <td className="py-2 text-slate-500">{e.reportsTo?.name ?? "—"}</td>
                       <td className="py-2 text-right">
@@ -66,6 +97,11 @@ export default async function PeoplePage() {
                         ) : (
                           <span className="text-slate-300">—</span>
                         )}
+                      </td>
+                      <td className="py-2 pl-2 text-right">
+                        <Link href={`/people/${e.id}`} className="text-xs text-blue-600 hover:underline">
+                          Trend →
+                        </Link>
                       </td>
                     </tr>
                   );

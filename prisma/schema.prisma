@@ -21,6 +21,7 @@ model Department {
   id    String @id @default(cuid())
   name  String @unique
   roles Role[]
+  groups Group[]
 }
 
 model Role {
@@ -33,6 +34,7 @@ model Role {
   description  String?
   employees    Employee[]
   kpiTemplates KpiTemplate[]
+  taskTemplates TaskTemplate[]
 }
 
 model Employee {
@@ -40,6 +42,7 @@ model Employee {
   name         String
   email        String    @unique
   phone        String?
+  avatarUrl    String?
   passwordHash String
   roleId       String
   role         Role      @relation(fields: [roleId], references: [id])
@@ -71,6 +74,12 @@ model Employee {
   announcementComments AnnouncementComment[]
   birthdayWishesReceived BirthdayWish[] @relation("WishFor")
   birthdayWishesGiven    BirthdayWish[] @relation("WishFrom")
+
+  groupMemberships GroupMember[]
+  groupsCreated    Group[]        @relation("GroupCreatedBy")
+  watchingTasks    TaskWatcher[]
+  checklistTicks   ChecklistItem[] @relation("ChecklistDoneBy")
+  templatesCreated TaskTemplate[]
 }
 
 // ---------------------------------------------------------------------------
@@ -185,8 +194,9 @@ model KpiTemplate {
   isPrimary     Boolean @default(true) // Primary vs Secondary KRA
   orderIndex    Int     @default(0)
 
-  tasks  Task[]
-  scores MonthlyScore[]
+  tasks     Task[]
+  scores    MonthlyScore[]
+  templates TaskTemplate[]
 }
 
 // Per-KPI monthly score (system auto value + manager's final/override)
@@ -289,18 +299,106 @@ model Task {
   projectId     String?
   project       Project? @relation(fields: [projectId], references: [id])
 
+  groupId       String?      // departmental/team group this task was posted in, if any
+  group         Group?       @relation(fields: [groupId], references: [id])
+  category      String?      // freeform tag, e.g. "Content", "Client Follow-up"
+
   dueAt            DateTime?
   startAt          DateTime?
   endAt            DateTime?
   carryForwardDate DateTime? // last time this task was auto-carried to "today"
   carryCount       Int       @default(0)
+  reworkCount      Int       @default(0) // times sent back for rework after review (manager rejected)
+  rejectionReason  String?   // manager's latest "do this again" note
+  rejectedAt       DateTime?
   completedAt      DateTime?
+  deletedAt        DateTime? // soft delete — never hard-deleted, just hidden + restorable
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  comments    TaskComment[]
-  attachments Attachment[]
-  reminders   Reminder[]
+  comments        TaskComment[]
+  attachments     Attachment[]
+  reminders       Reminder[]
+  checklistItems  ChecklistItem[]
+  watchers        TaskWatcher[]
+}
+
+// One checklist line under a task. A task can have any number ("n") of these;
+// the UI only allows marking the task Closed once every item is ticked.
+model ChecklistItem {
+  id         String    @id @default(cuid())
+  taskId     String
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  text       String
+  done       Boolean   @default(false)
+  orderIndex Int       @default(0)
+  doneAt     DateTime?
+  doneById   String?
+  doneBy     Employee? @relation("ChecklistDoneBy", fields: [doneById], references: [id])
+  createdAt  DateTime  @default(now())
+}
+
+// "In loop" watchers on a task — get visibility without being the assignee.
+model TaskWatcher {
+  id         String   @id @default(cuid())
+  taskId     String
+  task       Task     @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  notified   Boolean  @default(false) // has the "in loop" pop-up notification been shown/dismissed
+  createdAt  DateTime @default(now())
+
+  @@unique([taskId, employeeId])
+}
+
+// Reusable task blueprint (title/description/checklist/kpi) managers can save
+// once and reuse — "Task Templates" in the sidebar.
+model TaskTemplate {
+  id            String   @id @default(cuid())
+  name          String
+  title         String
+  description   String?
+  kpiTemplateId String?
+  kpiTemplate   KpiTemplate? @relation(fields: [kpiTemplateId], references: [id])
+  roleId        String?      // position this template is for — shows under that role in Admin
+  role          Role?        @relation(fields: [roleId], references: [id])
+  sizeLabel     String?
+  category      String?
+  checklistJSON String?  // JSON array of strings — checklist item texts
+  createdById   String?
+  createdBy     Employee? @relation(fields: [createdById], references: [id])
+  createdAt     DateTime @default(now())
+}
+
+// ---------------------------------------------------------------------------
+// Departmental / team groups — members exchange & self-assign tasks within
+// the group without needing manager-only delegation rights.
+// ---------------------------------------------------------------------------
+
+model Group {
+  id           String   @id @default(cuid())
+  name         String
+  description  String?
+  departmentId String?
+  department   Department? @relation(fields: [departmentId], references: [id])
+  createdById  String?
+  createdBy    Employee?   @relation("GroupCreatedBy", fields: [createdById], references: [id])
+  createdAt    DateTime    @default(now())
+
+  members GroupMember[]
+  tasks   Task[]
+}
+
+model GroupMember {
+  id         String   @id @default(cuid())
+  groupId    String
+  group      Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  employeeId String
+  employee   Employee @relation(fields: [employeeId], references: [id])
+  role       String   @default("MEMBER") // ADMIN | MEMBER — group admins can add/remove members
+  joinedAt   DateTime @default(now())
+
+  @@unique([groupId, employeeId])
 }
 
 model TaskComment {

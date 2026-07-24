@@ -1,7 +1,7 @@
-import Link from "next/link";
 import { Badge } from "../_components/ui";
 import { priorityQuadrant } from "@/lib/constants";
 import MoveControl from "./MoveControl";
+import TaskLink from "../_components/TaskLink";
 
 type TaskLike = {
   id: string;
@@ -41,12 +41,12 @@ export default function TaskCard({
   const quad = priorityQuadrant(task.urgent, task.important);
   return (
     <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-      <Link
-        href={`/task/${task.id}`}
+      <TaskLink
+        taskId={task.id}
         className="text-sm font-medium leading-snug text-slate-900 hover:text-blue-600 hover:underline"
       >
         {task.title}
-      </Link>
+      </TaskLink>
 
       <div className="mt-2 flex flex-wrap gap-1.5">
         <Badge className={quadTone[quad]}>{quad}</Badge>

@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { TASK_STATUS_ORDER } from "@/lib/constants";
 import { mondayOf } from "@/lib/date";
 import { cn } from "@/lib/cn";
@@ -9,6 +9,13 @@ import BucketFill from "../_components/BucketFill";
 import AutoRefresh from "../_components/AutoRefresh";
 import NewTaskDialog from "./NewTaskDialog";
 import KanbanBoard from "./KanbanBoard";
+import { loadTemplateOptions } from "@/lib/templates";
+
+function toDate(val: any): Date | null {
+  if (!val) return null;
+  if (val.toDate) return val.toDate();
+  return new Date(val);
+}
 
 export default async function BoardPage({
   searchParams,
@@ -20,74 +27,115 @@ export default async function BoardPage({
   const sp = await searchParams;
   const period = sp.period === "week" ? "week" : sp.period === "month" ? "month" : "today";
 
-  const tasks = await prisma.task.findMany({
-    where: { assigneeId: user.id },
-    include: { kpiTemplate: true, project: true, creator: { select: { name: true } } },
-    orderBy: [{ urgent: "desc" }, { important: "desc" }, { createdAt: "desc" }],
-  });
+  const [tasksSnap, kpiOptionsSnap] = await Promise.all([
+    adminDb.collection("Task").where("assigneeId", "==", user.id).where("deletedAt", "==", null).get(),
+    adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
+  ]);
 
-  const kpiOptions = await prisma.kpiTemplate.findMany({
-    where: { roleId: user.roleId },
-    orderBy: { orderIndex: "asc" },
-    select: { id: true, kpiName: true, kraName: true },
-  });
+  const kpiOptions = kpiOptionsSnap.docs
+    .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
+    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }));
 
-  // KPI bucket-balance check (this month)
+  // Fetch related data for tasks
+  const tasks = await Promise.all(
+    tasksSnap.docs.map(async (doc) => {
+      const t = doc.data() as any;
+      let kpiTemplateName: string | null = null;
+      let projectName: string | null = null;
+      let creatorName: string | null = null;
+      let checklistItems: any[] = [];
+
+      const [kpiDoc, projectDoc, creatorDoc, checkSnap] = await Promise.all([
+        t.kpiTemplateId ? adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get() : Promise.resolve(null),
+        t.projectId ? adminDb.collection("Project").doc(t.projectId).get() : Promise.resolve(null),
+        t.creatorId ? adminDb.collection("Employee").doc(t.creatorId).get() : Promise.resolve(null),
+        adminDb.collection("ChecklistItem").where("taskId", "==", doc.id).get(),
+      ]);
+
+      if (kpiDoc?.exists) kpiTemplateName = kpiDoc.data()!.kpiName;
+      if (projectDoc?.exists) projectName = projectDoc.data()!.name;
+      if (creatorDoc?.exists) creatorName = creatorDoc.data()!.name;
+      checklistItems = checkSnap.docs.map((c) => ({ done: c.data().done }));
+
+      return {
+        id: doc.id,
+        title: t.title,
+        status: t.status,
+        sizeLabel: t.sizeLabel,
+        urgent: t.urgent,
+        important: t.important,
+        estimatedMins: t.estimatedMins,
+        dueAt: toDate(t.dueAt)?.toISOString() ?? null,
+        holdReason: t.holdReason,
+        reviewRequired: t.reviewRequired,
+        carryCount: t.carryCount ?? 0,
+        reworkCount: t.reworkCount ?? 0,
+        kpiTemplateId: t.kpiTemplateId ?? null,
+        creatorId: t.creatorId,
+        kpiTemplate: kpiTemplateName ? { kpiName: kpiTemplateName } : null,
+        project: projectName ? { name: projectName } : null,
+        creator: creatorName ? { name: creatorName } : null,
+        checklistItems,
+      };
+    })
+  );
+
+  // KPI bucket-balance check (this month) — single fetch, filter in JS
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  const monthTasks = await prisma.task.findMany({
-    where: { assigneeId: user.id, createdAt: { gte: startOfMonth } },
-    select: { kpiTemplateId: true },
-  });
-  const workedBuckets = new Set(monthTasks.filter((t) => t.kpiTemplateId).map((t) => t.kpiTemplateId));
-  const imbalance =
-    kpiOptions.length >= 4 && monthTasks.length >= 3 && workedBuckets.size <= 2;
+  const startOfMonthMs = startOfMonth.getTime();
+  // Fetch all user tasks for date-based stats (separate from the board tasks which exclude deleted)
+  const allUserTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).get();
+  const allUserTasks = allUserTasksSnap.docs;
 
-  // Bucket water-fill: how many tasks landed in each KPI bucket this period
+  const workedBuckets = new Set(
+    allUserTasks
+      .filter((d) => { const raw = d.data().createdAt; const t = raw?.toDate ? raw.toDate() : new Date(raw ?? 0); return t.getTime() >= startOfMonthMs; })
+      .map((d) => d.data().kpiTemplateId).filter(Boolean)
+  );
+  const monthCount = allUserTasks.filter((d) => { const raw = d.data().createdAt; const t = raw?.toDate ? raw.toDate() : new Date(raw ?? 0); return t.getTime() >= startOfMonthMs; }).length;
+  const imbalance = kpiOptions.length >= 4 && monthCount >= 3 && workedBuckets.size <= 2;
+
+  // Bucket water-fill
   const periodStart =
     period === "today"
       ? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })()
       : period === "week"
         ? mondayOf()
         : startOfMonth;
-  const periodTasks = await prisma.task.findMany({
-    where: { assigneeId: user.id, createdAt: { gte: periodStart } },
-    select: { kpiTemplateId: true },
-  });
+  const periodStartMs = periodStart.getTime();
   const countByKpi = new Map<string, number>();
-  for (const t of periodTasks) {
-    if (!t.kpiTemplateId) continue;
-    countByKpi.set(t.kpiTemplateId, (countByKpi.get(t.kpiTemplateId) ?? 0) + 1);
+  for (const doc of allUserTasks) {
+    const raw = doc.data().createdAt;
+    const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+    if (createdAt.getTime() < periodStartMs) continue;
+    const kpiId = doc.data().kpiTemplateId;
+    if (!kpiId) continue;
+    countByKpi.set(kpiId, (countByKpi.get(kpiId) ?? 0) + 1);
   }
   const bucketData = kpiOptions.map((k) => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
 
-  // Today's counts specifically, for the "new task" KPI preview (independent of the period tabs above)
-  const todaysCounts: Record<string, number> = period === "today" ? Object.fromEntries(countByKpi) : {};
-  if (period !== "today") {
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
-    const todaysTasks = await prisma.task.findMany({
-      where: { assigneeId: user.id, createdAt: { gte: todayStart } },
-      select: { kpiTemplateId: true },
-    });
-    for (const t of todaysTasks) {
-      if (!t.kpiTemplateId) continue;
-      todaysCounts[t.kpiTemplateId] = (todaysCounts[t.kpiTemplateId] ?? 0) + 1;
-    }
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayStartMs = todayStart.getTime();
+  const todaysCounts: Record<string, number> = {};
+  for (const doc of allUserTasks) {
+    const raw = doc.data().createdAt;
+    const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+    if (createdAt.getTime() < todayStartMs) continue;
+    const kpiId = doc.data().kpiTemplateId;
+    if (!kpiId) continue;
+    todaysCounts[kpiId] = (todaysCounts[kpiId] ?? 0) + 1;
   }
 
-  // Who can this person assign to: themselves always; managers can delegate to
-  // ANY active employee (not just their direct reports) — "anybody can give a
-  // task to anyone" for managers/executives, per company policy.
   const assignable = isManagerLike(user.systemRole)
-    ? await prisma.employee.findMany({
-        where: { active: true, id: { not: user.id } },
-        select: { id: true, name: true },
-        orderBy: { name: "asc" },
-      })
+    ? (await adminDb.collection("Employee").where("active", "==", true).get()).docs
+        .map((d) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .filter((e) => e.id !== user.id)
     : [];
-  const people = [{ id: user.id, name: `${user.name} (me)` }, ...assignable];
+  const people = [{ id: user.id, name: `${user.name} (me)`, roleId: user.roleId }, ...assignable];
+  const templates = await loadTemplateOptions();
 
-  // serialize tasks for the client Kanban board
   const boardTasks = tasks.map((t) => ({
     id: t.id,
     title: t.title,
@@ -96,14 +144,17 @@ export default async function BoardPage({
     urgent: t.urgent,
     important: t.important,
     estimatedMins: t.estimatedMins,
-    dueAt: t.dueAt ? t.dueAt.toISOString() : null,
+    dueAt: t.dueAt,
     holdReason: t.holdReason,
     reviewRequired: t.reviewRequired,
     carryCount: t.carryCount,
+    reworkCount: t.reworkCount,
     kpiName: t.kpiTemplate?.kpiName ?? null,
     projectName: t.project?.name ?? null,
     delegatedBy:
       t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name ?? null : null,
+    checklistTotal: t.checklistItems.length,
+    checklistDone: t.checklistItems.filter((c: any) => c.done).length,
   }));
 
   return (
@@ -115,7 +166,7 @@ export default async function BoardPage({
             {tasks.length} task{tasks.length === 1 ? "" : "s"} · every task fills a KPI bucket
           </p>
         </div>
-        <NewTaskDialog kpiOptions={kpiOptions} people={people} selfId={user.id} todaysCounts={todaysCounts} />
+        <NewTaskDialog kpiOptions={kpiOptions} people={people} selfId={user.id} todaysCounts={todaysCounts} templates={templates} />
       </div>
 
       <Card>
@@ -157,7 +208,7 @@ export default async function BoardPage({
       )}
 
       <p className="text-xs text-slate-400">
-        💡 Drag a card between columns to change its status — or use the “Move to…” dropdown on each card.
+        💡 Drag a card between columns to change its status — or use the "Move to…" dropdown on each card.
       </p>
       <KanbanBoard initialTasks={boardTasks} columns={[...TASK_STATUS_ORDER]} />
     </div>

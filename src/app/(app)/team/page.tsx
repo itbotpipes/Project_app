@@ -1,44 +1,68 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel } from "@/lib/scores";
 import { Card, SectionTitle, Badge } from "../_components/ui";
+
+function toDate(val: any): Date | null {
+  if (!val) return null;
+  if (val.toDate) return val.toDate();
+  return new Date(val);
+}
 
 export default async function TeamPage() {
   const user = await getCurrentUser();
   if (!user) return null;
   if (!isManagerLike(user.systemRole)) redirect("/");
 
-  const reports = await prisma.employee.findMany({
-    where: { reportsToId: user.id, active: true },
-    include: {
-      role: true,
-      scorecards: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 1 },
-      _count: { select: { assignedTasks: { where: { status: { notIn: ["CLOSED"] } } } } },
-    },
-    orderBy: { name: "asc" },
-  });
+  const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
+  
+  const reportsData = await Promise.all(
+    reportsSnap.docs.map(async (doc) => {
+      const emp = doc.data() as any;
+      const [roleDoc, scorecardsSnap, openTasksSnap] = await Promise.all([
+        emp.roleId ? adminDb.collection("Role").doc(emp.roleId).get() : Promise.resolve(null),
+        adminDb.collection("MonthlyScorecard").where("employeeId", "==", doc.id).get(),
+        adminDb.collection("Task").where("assigneeId", "==", doc.id).where("status", "!=", "CLOSED").get(),
+      ]);
+      
+      const role = roleDoc?.exists ? roleDoc.data()! : { title: "Unknown" };
+      const latestScorecard = scorecardsSnap.empty
+        ? null
+        : scorecardsSnap.docs
+            .sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month))[0]
+            .data();
+      
+      // Filter out deleted tasks
+      const activeOpenTasks = openTasksSnap.docs.filter(t => !t.data().deletedAt).map(t => ({ dueAt: toDate(t.data().dueAt) }));
+      
+      return {
+        id: doc.id,
+        name: emp.name,
+        role,
+        scorecards: latestScorecard ? [latestScorecard] : [],
+        openTasks: activeOpenTasks,
+        _count: { assignedTasks: activeOpenTasks.length }
+      };
+    })
+  );
+  reportsData.sort((a, b) => a.name.localeCompare(b.name));
 
   // Workload radar — open + overdue tasks per report
   const now = new Date();
-  const openTasks = await prisma.task.findMany({
-    where: { assigneeId: { in: reports.map((r) => r.id) }, status: { notIn: ["CLOSED"] } },
-    select: { assigneeId: true, dueAt: true },
+  
+  const radar = reportsData.map((r) => {
+    let overdueCount = 0;
+    for (const t of r.openTasks) {
+      if (t.dueAt && t.dueAt < now) overdueCount++;
+    }
+    const openCount = r.openTasks.length;
+    const status = openCount >= 7 ? "Overloaded" : openCount === 0 ? "Underutilized" : "Balanced";
+    return { id: r.id, name: r.name, open: openCount, overdue: overdueCount, status };
   });
-  const load = new Map<string, { open: number; overdue: number }>();
-  for (const r of reports) load.set(r.id, { open: 0, overdue: 0 });
-  for (const t of openTasks) {
-    const l = load.get(t.assigneeId)!;
-    l.open++;
-    if (t.dueAt && new Date(t.dueAt) < now) l.overdue++;
-  }
-  const radar = reports.map((r) => {
-    const l = load.get(r.id)!;
-    const status = l.open >= 7 ? "Overloaded" : l.open === 0 ? "Underutilized" : "Balanced";
-    return { id: r.id, name: r.name, ...l, status };
-  });
+  
   const statusTone: Record<string, string> = {
     Overloaded: "bg-red-100 text-red-700",
     Balanced: "bg-emerald-100 text-emerald-700",
@@ -51,7 +75,7 @@ export default async function TeamPage() {
         <div>
           <h1 className="text-2xl font-semibold">My Team</h1>
           <p className="text-sm text-slate-500">
-            {reports.length} direct report{reports.length === 1 ? "" : "s"} · tasks &amp; monthly scores
+            {reportsData.length} direct report{reportsData.length === 1 ? "" : "s"} · tasks &amp; monthly scores
           </p>
         </div>
         <Link href="/scores" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
@@ -59,7 +83,7 @@ export default async function TeamPage() {
         </Link>
       </div>
 
-      {reports.length === 0 && (
+      {reportsData.length === 0 && (
         <Card>
           <p className="text-sm text-slate-500">No direct reports assigned to you yet.</p>
         </Card>
@@ -83,17 +107,17 @@ export default async function TeamPage() {
         </Card>
       )}
 
-      {reports.length > 0 && (
+      {reportsData.length > 0 && (
         <Card>
           <SectionTitle>Team scores</SectionTitle>
           <div className="divide-y divide-slate-100">
-            {reports.map((r) => {
+            {reportsData.map((r) => {
               const latest = r.scorecards[0];
               const band = latest ? incrementBand(latest.total) : null;
               return (
                 <div key={r.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 py-3">
                   <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
-                    {r.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                    {r.name.split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
                   </div>
                   <div className="min-w-0">
                     <div className="font-medium">{r.name}</div>

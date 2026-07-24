@@ -1,30 +1,37 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { getCurrentUser, canScoreCompanyWide } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase/admin";
 import { REACTION_EMOJIS, type ReactionEmoji } from "@/lib/reactions";
 
-/** Add my reaction, or remove it if I already reacted with that emoji (like / unlike). */
 export async function toggleReaction(announcementId: string, emoji: string) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
   if (!REACTION_EMOJIS.includes(emoji as ReactionEmoji)) return { error: "Bad emoji" };
 
-  const existing = await prisma.announcementReaction.findUnique({
-    where: { announcementId_employeeId_emoji: { announcementId, employeeId: user.id, emoji } },
-  });
-  if (existing) {
-    await prisma.announcementReaction.delete({ where: { id: existing.id } });
+  const snap = await adminDb.collection("AnnouncementReaction")
+    .where("announcementId", "==", announcementId)
+    .where("employeeId", "==", user.id)
+    .where("emoji", "==", emoji)
+    .limit(1)
+    .get();
+
+  if (!snap.empty) {
+    await adminDb.collection("AnnouncementReaction").doc(snap.docs[0].id).delete();
   } else {
-    await prisma.announcementReaction.create({ data: { announcementId, employeeId: user.id, emoji } });
+    await adminDb.collection("AnnouncementReaction").add({
+      announcementId,
+      employeeId: user.id,
+      emoji,
+      createdAt: new Date(),
+    });
   }
   revalidatePath("/");
   revalidatePath("/announcements");
   return { ok: true };
 }
 
-/** Add a comment to an announcement / the Thought of the day. */
 export async function addComment(formData: FormData) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
@@ -33,28 +40,32 @@ export async function addComment(formData: FormData) {
   if (!announcementId || !body) return { error: "Empty comment" };
   if (body.length > 1000) return { error: "Too long" };
 
-  await prisma.announcementComment.create({
-    data: { announcementId, employeeId: user.id, body },
+  await adminDb.collection("AnnouncementComment").add({
+    announcementId,
+    employeeId: user.id,
+    body,
+    createdAt: new Date(),
   });
   revalidatePath("/");
   revalidatePath("/announcements");
   return { ok: true };
 }
 
-/** Delete a comment — author, or Admin/CEO/HR. */
 export async function deleteComment(commentId: string) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
-  const c = await prisma.announcementComment.findUnique({ where: { id: commentId } });
-  if (!c) return { error: "Not found" };
+
+  const cDoc = await adminDb.collection("AnnouncementComment").doc(commentId).get();
+  if (!cDoc.exists) return { error: "Not found" };
+  const c = cDoc.data()!;
+
   if (c.employeeId !== user.id && !canScoreCompanyWide(user)) return { error: "Not authorized" };
-  await prisma.announcementComment.delete({ where: { id: commentId } });
+  await adminDb.collection("AnnouncementComment").doc(commentId).delete();
   revalidatePath("/");
   revalidatePath("/announcements");
   return { ok: true };
 }
 
-/** Post a birthday wish for a colleague; can @-tag other employees. */
 export async function postBirthdayWish(formData: FormData) {
   const user = await getCurrentUser();
   if (!user) return { error: "Not signed in" };
@@ -64,14 +75,13 @@ export async function postBirthdayWish(formData: FormData) {
   if (!forId || !body) return { error: "Write a wish first" };
   if (body.length > 500) return { error: "Too long" };
 
-  await prisma.birthdayWish.create({
-    data: {
-      forId,
-      fromId: user.id,
-      body,
-      taggedIds: tagged.length ? JSON.stringify(tagged) : null,
-      year: new Date().getFullYear(),
-    },
+  await adminDb.collection("BirthdayWish").add({
+    forId,
+    fromId: user.id,
+    body,
+    taggedIds: tagged.length ? JSON.stringify(tagged) : null,
+    year: new Date().getFullYear(),
+    createdAt: new Date(),
   });
   revalidatePath("/");
   return { ok: true };

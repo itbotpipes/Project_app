@@ -1,112 +1,62 @@
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
-import { prisma } from "@/lib/db";
-import { incrementBand } from "@/lib/constants";
-import { monthLabel, recentAverage } from "@/lib/scores";
-import { behaviourPct, behaviourPctFromMany } from "@/lib/behaviour";
+import { adminDb } from "@/lib/firebase/admin";
+import { monthLabel } from "@/lib/scores";
+import { loadEmployeePerformance } from "@/lib/employeePerformance";
 import { Card, StatCard, SectionTitle, Badge } from "../_components/ui";
 import { DualTrendLine, Donut, Legend, ScoreBars, IncrementBar } from "../_components/Charts";
 import BucketFill from "../_components/BucketFill";
-
-function readiness(avg: number) {
-  if (avg >= 75) return { label: "Ready for promotion", tone: "bg-emerald-100 text-emerald-700" };
-  if (avg >= 65) return { label: "Developing — on track", tone: "bg-blue-100 text-blue-700" };
-  if (avg >= 45) return { label: "Needs improvement", tone: "bg-amber-100 text-amber-700" };
-  return { label: "Below expectations", tone: "bg-red-100 text-red-700" };
-}
 
 export default async function PerformancePage() {
   const user = await getCurrentUser();
   if (!user) return null;
   const manager = isManagerLike(user.systemRole);
 
-  const myCards = await prisma.monthlyScorecard.findMany({
-    where: { employeeId: user.id },
-    orderBy: [{ year: "asc" }, { month: "asc" }],
-  });
-
-  // Trend: system auto total vs the manager-approved final total, month by month
-  const trend = myCards.map((c) => ({
-    label: monthLabel(c.year, c.month),
-    auto: c.autoTotal || null,
-    manager: c.total,
-  }));
-
-  const latestFinal = myCards[myCards.length - 1];
-  const avg = recentAverage(myCards);
-  const band = incrementBand(avg);
-  const ready = readiness(avg);
-
-  // Annual increment projection (behaviour from HOD/HR/COO reviews + target from yearly review)
-  const nowYear = new Date().getFullYear();
-  const [review, behaviourAll] = await Promise.all([
-    prisma.yearlyReview.findUnique({
-      where: { employeeId_year: { employeeId: user.id, year: nowYear } },
-    }),
-    prisma.behaviourReview.findMany({
-      where: { employeeId: user.id },
-      orderBy: [{ year: "desc" }, { month: "desc" }],
-    }),
-  ]);
-  const behaviourThisYear = behaviourAll.filter((b) => b.year === nowYear);
-  const behaviourYearPct = behaviourPctFromMany(behaviourThisYear); // 0-100 or null
-  const behaviourByMonth = new Map(behaviourAll.map((b) => [`${b.year}-${b.month}`, b]));
-
-  const kpiComponent = Math.round((Math.min(100, avg) / 100) * 5 * 10) / 10; // max 5%
-  const behaviourComponent =
-    behaviourYearPct != null ? Math.round((behaviourYearPct / 100) * 5 * 10) / 10 : null; // max 5%
-  const targetComponent =
-    review?.targetAchievedPct != null ? Math.round((review.targetAchievedPct / 100) * 10 * 10) / 10 : null; // max 10%
-  const incrementTotal =
-    kpiComponent + (behaviourComponent ?? 0) + (targetComponent ?? 0);
-
-  // Monthly score history (newest first) — visible to the employee themselves
-  const history = [...myCards].reverse().map((c) => {
-    const bh = behaviourByMonth.get(`${c.year}-${c.month}`);
-    return {
-      key: `${c.year}-${c.month}`,
-      label: monthLabel(c.year, c.month),
-      auto: c.autoTotal,
-      total: c.total,
-      behaviour: bh ? behaviourPct(bh) / 10 : null, // out of 10
-    };
-  });
-
-  const myKpis = await prisma.kpiTemplate.findMany({
-    where: { roleId: user.roleId },
-    orderBy: { orderIndex: "asc" },
-  });
-  // KPI buckets grouped by KRA for the weightage donut
-  const kraMap = new Map<string, number>();
-  for (const k of myKpis) kraMap.set(k.kraName, (kraMap.get(k.kraName) ?? 0) + k.weightage);
-  const bucketData = [...kraMap.entries()].map(([name, value]) => ({ name, value }));
-
-  // Bucket water-fill: how many tasks landed in each bucket this month
-  const startOfMonthKpi = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-  const monthTasksForFill = await prisma.task.findMany({
-    where: { assigneeId: user.id, createdAt: { gte: startOfMonthKpi } },
-    select: { kpiTemplateId: true },
-  });
-  const countByKpi = new Map<string, number>();
-  for (const t of monthTasksForFill) {
-    if (!t.kpiTemplateId) continue;
-    countByKpi.set(t.kpiTemplateId, (countByKpi.get(t.kpiTemplateId) ?? 0) + 1);
-  }
-  const bucketFillData = myKpis.map((k) => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
+  const {
+    trend,
+    latestFinal,
+    avg,
+    band,
+    ready,
+    nowYear,
+    kpiComponent,
+    behaviourComponent,
+    targetComponent,
+    incrementTotal,
+    history,
+    bucketData,
+    bucketFillData,
+  } = await loadEmployeePerformance(user.id);
 
   // Team scores (managers) — latest period
-  const latestPeriod = await prisma.monthlyScorecard.findFirst({
-    orderBy: [{ year: "desc" }, { month: "desc" }],
-  });
-  const reports = manager
-    ? await prisma.employee.findMany({
-        where: { reportsToId: user.id, active: true },
-        include: {
-          role: true,
-          scorecards: { orderBy: [{ year: "desc" }, { month: "desc" }], take: 1 },
-        },
-        orderBy: { name: "asc" },
+  // Team scores (managers) — latest period
+  const allScorecardsSnap = await adminDb.collection("MonthlyScorecard").get();
+  const allScoresDocs = allScorecardsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
+  const latestPeriodSnap = { empty: allScoresDocs.length === 0, docs: allScoresDocs.slice(0, 1) };
+  const latestPeriod = latestPeriodSnap.empty ? null : latestPeriodSnap.docs[0].data();
+  
+  let reports: any[] = [];
+  if (manager) {
+    const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
+    reports = await Promise.all(
+      reportsSnap.docs.map(async (doc) => {
+        const emp = doc.data() as any;
+        let roleData = null;
+        let latestScorecard = null;
+        const [roleDoc, scorecardsSnap] = await Promise.all([
+          emp.roleId ? adminDb.collection("Role").doc(emp.roleId).get() : Promise.resolve(null),
+          adminDb.collection("MonthlyScorecard").where("employeeId", "==", doc.id).get(),
+        ]);
+        if (roleDoc?.exists) roleData = roleDoc.data();
+        if (!scorecardsSnap.empty) {
+          // Sort in JS and get the latest one
+          const sorted = scorecardsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
+          latestScorecard = sorted[0].data();
+        }
+        return { id: doc.id, name: emp.name, role: roleData, scorecards: latestScorecard ? [latestScorecard] : [] };
       })
-    : [];
+    );
+    reports.sort((a, b) => a.name.localeCompare(b.name));
+  }
   const teamBars = reports
     .map((r) => ({ name: r.name, score: Math.round(r.scorecards[0]?.total ?? 0) }))
     .filter((r) => r.score > 0);

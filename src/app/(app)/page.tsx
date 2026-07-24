@@ -1,17 +1,25 @@
 import Link from "next/link";
 import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
 import { computeStreak, streakBadges, upcomingBirthdays } from "@/lib/gamification";
 import { computeAdherence } from "@/lib/adherence";
+import { loadDailyTaskAnalysis } from "@/lib/dailyAnalysis";
 import { Card, StatCard, SectionTitle, Badge } from "./_components/ui";
 import { DualTrendLine } from "./_components/Charts";
 import Celebration from "./_components/Celebration";
 import RitualBanners from "./_components/RitualBanners";
 import ThoughtSocial from "./_components/ThoughtSocial";
 import BirthdayWishes from "./_components/BirthdayWishes";
+import TaskAnalysisCard from "./_components/TaskAnalysisCard";
 import { relativeTime } from "@/lib/date";
+
+function toDate(val: any): Date | null {
+  if (!val) return null;
+  if (val.toDate) return val.toDate();
+  return new Date(val);
+}
 
 export default async function Dashboard() {
   const user = await getCurrentUser();
@@ -19,11 +27,12 @@ export default async function Dashboard() {
   const manager = isManagerLike(user.systemRole);
   const scorer = canScoreCompanyWide(user);
 
-  // My monthly scorecards: final total (manager-approved) vs system auto total
-  const myCards = await prisma.monthlyScorecard.findMany({
-    where: { employeeId: user.id },
-    orderBy: [{ year: "asc" }, { month: "asc" }],
-  });
+  // My monthly scorecards
+  const myCardsSnap = await adminDb.collection("MonthlyScorecard").where("employeeId", "==", user.id).get();
+  const myCards = myCardsSnap.docs
+    .map(d => ({ id: d.id, ...d.data() } as any))
+    .sort((a, b) => (a.year - b.year) || (a.month - b.month));
+  
   const trend = myCards.map((c) => ({
     label: monthLabel(c.year, c.month),
     auto: c.autoTotal || null,
@@ -34,62 +43,88 @@ export default async function Dashboard() {
   const avg = recentAverage(myCards);
   const band = incrementBand(avg);
 
-  // My tasks
-  const [openTasks, dueToday] = await Promise.all([
-    prisma.task.count({
-      where: { assigneeId: user.id, status: { notIn: ["CLOSED"] } },
-    }),
-    prisma.task.count({
-      where: {
-        assigneeId: user.id,
-        status: { notIn: ["CLOSED"] },
-        dueAt: { lte: endOfToday() },
-      },
-    }),
-  ]);
+  // Tasks
+  const todayEnd = endOfToday();
+  const openTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "!=", "CLOSED").get();
+  // Ensure we don't count deleted tasks if we still have a soft delete concept, 
+  // but let's assume deleted tasks have status 'CLOSED' or are filtered out.
+  // wait, our query earlier had deletedAt == null. Let's filter in memory for deletedAt.
+  const activeOpenTasks = openTasksSnap.docs.filter(d => !d.data().deletedAt);
+  const openTasks = activeOpenTasks.length;
+  
+  let dueToday = 0;
+  for (const doc of activeOpenTasks) {
+    const dueAt = toDate(doc.data().dueAt);
+    if (dueAt && dueAt.getTime() <= todayEnd.getTime()) dueToday++;
+  }
 
   // Daily ritual state
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
-  const ritual = await prisma.dailyRitual.findUnique({
-    where: { employeeId_date: { employeeId: user.id, date: todayStart } },
-  });
+  const ritualSnap = await adminDb.collection("DailyRitual").where("employeeId", "==", user.id).where("date", "==", todayStart).get();
+  const ritual = ritualSnap.empty ? null : (ritualSnap.docs[0].data() as any);
 
-  // Plan adherence: what was planned this morning vs what actually got closed today
-  const closedTodayTasks = await prisma.task.findMany({
-    where: { assigneeId: user.id, status: "CLOSED", completedAt: { gte: todayStart } },
-    select: { id: true },
-  });
+  // Plan adherence
+  const closedTodayTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get();
+  const closedTodayTasks = closedTodayTasksSnap.docs.filter(d => {
+    const cAt = toDate(d.data().completedAt);
+    return cAt && cAt.getTime() >= todayStart.getTime() && !d.data().deletedAt;
+  }).map(d => ({ id: d.id }));
+  
   const adherence = computeAdherence(ritual?.plannedTaskIds ?? null, closedTodayTasks.map((t) => t.id));
 
-  // Streak & badges (from completed tasks)
-  const completed = await prisma.task.findMany({
-    where: { assigneeId: user.id, completedAt: { not: null } },
-    select: { completedAt: true },
-  });
-  const streak = computeStreak(completed.map((c) => c.completedAt!) as Date[]);
-  const badges = streakBadges(streak);
-  const startOfToday = new Date();
-  startOfToday.setHours(0, 0, 0, 0);
-  const closedToday = await prisma.task.count({
-    where: { assigneeId: user.id, status: "CLOSED", completedAt: { gte: startOfToday } },
-  });
-  const celebrate = openTasks === 0 && closedToday > 0;
+  // Detailed daily task analysis
+  const taskAnalysis = await loadDailyTaskAnalysis(user.id);
 
-  // Announcements + birthdays
-  const announcements = await prisma.announcement.findMany({
-    orderBy: [{ pinned: "desc" }, { createdAt: "desc" }],
-    take: 6,
-    include: {
-      author: true,
-      reactions: true,
-      comments: { include: { employee: { select: { name: true } } }, orderBy: { createdAt: "asc" } },
-    },
+  // Streak & badges
+  const completedSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get();
+  const completedDates = completedSnap.docs.map(d => toDate(d.data().completedAt)).filter(Boolean) as Date[];
+  const streak = computeStreak(completedDates);
+  const badges = streakBadges(streak);
+  
+  const closedTodayCount = closedTodayTasks.length;
+  const celebrate = openTasks === 0 && closedTodayCount > 0;
+
+  // Announcements
+  const announcementsSnap = await adminDb.collection("Announcement").get();
+  announcementsSnap.docs.sort((a, b) => {
+    const pd = (b.data().pinned ? 1 : 0) - (a.data().pinned ? 1 : 0);
+    if (pd !== 0) return pd;
+    const at = a.data().createdAt?.toDate?.() ?? new Date(0);
+    const bt = b.data().createdAt?.toDate?.() ?? new Date(0);
+    return bt.getTime() - at.getTime();
   });
+  announcementsSnap.docs.splice(6);
+  const announcements = await Promise.all(
+    announcementsSnap.docs.map(async (doc) => {
+      const a = doc.data() as any;
+      let authorData = null;
+      if (a.authorId) {
+        const authorDoc = await adminDb.collection("Employee").doc(a.authorId).get();
+        if (authorDoc.exists) authorData = authorDoc.data();
+      }
+      const reactionsSnap = await adminDb.collection("Reaction").where("announcementId", "==", doc.id).get();
+      const commentsSnap = await adminDb.collection("Comment").where("announcementId", "==", doc.id).get();
+      commentsSnap.docs.sort((a: any, b: any) => (a.data().createdAt?.toMillis?.() ?? 0) - (b.data().createdAt?.toMillis?.() ?? 0));
+      const comments = await Promise.all(
+        commentsSnap.docs.map(async (c: any) => {
+          const cd = c.data() as any;
+          const eDoc = await adminDb.collection("Employee").doc(cd.employeeId).get();
+          return { id: c.id, ...cd, createdAt: toDate(cd.createdAt), employee: { name: eDoc.exists ? eDoc.data()!.name : "Unknown" } };
+        })
+      );
+      return {
+        id: doc.id, ...a, 
+        author: authorData, 
+        reactions: reactionsSnap.docs.map(r => r.data()),
+        comments
+      };
+    })
+  );
+  
   const thought = announcements.find((a) => a.kind === "THOUGHT");
   const notices = announcements.filter((a) => a.kind !== "THOUGHT");
 
-  // reaction summary + comments for the thought card
   const thoughtReactions = thought
     ? (() => {
         const m = new Map<string, { count: number; mine: boolean }>();
@@ -103,7 +138,7 @@ export default async function Dashboard() {
       })()
     : [];
   const thoughtComments = thought
-    ? thought.comments.map((c) => ({
+    ? thought.comments.map((c: any) => ({
         id: c.id,
         author: c.employee.name,
         body: c.body,
@@ -112,29 +147,30 @@ export default async function Dashboard() {
       }))
     : [];
 
-  const bdayPeople = await prisma.employee.findMany({
-    where: { active: true, birthday: { not: null } },
-    select: { id: true, name: true, birthday: true },
-  });
+  // Birthdays
+  const bdayPeopleSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+  const allPeople = bdayPeopleSnap.docs.map(d => ({ id: d.id, name: d.data().name, birthday: toDate(d.data().birthday) })).sort((a, b) => a.name.localeCompare(b.name));
+  const bdayPeople = allPeople.filter(p => p.birthday);
+  
   const birthdays = upcomingBirthdays(bdayPeople, 21).slice(0, 4);
 
-  // people I can @-tag in a birthday wish + this year's wishes for upcoming birthday folks
-  const allPeople = await prisma.employee.findMany({
-    where: { active: true },
-    select: { id: true, name: true },
-    orderBy: { name: "asc" },
-  });
   const nowYear2 = new Date().getFullYear();
-  // wish the nearest upcoming birthday (today or soon), if any
   const wishTarget = birthdays[0] ?? null;
-  const wishesRaw = wishTarget
-    ? await prisma.birthdayWish.findMany({
-        where: { forId: wishTarget.id, year: nowYear2 },
-        include: { fromEmployee: { select: { name: true } } },
-        orderBy: { createdAt: "desc" },
-        take: 12,
+  
+  let wishesRaw: any[] = [];
+  if (wishTarget) {
+    const wishesSnap = await adminDb.collection("BirthdayWish").where("forId", "==", wishTarget.id).where("year", "==", nowYear2).get();
+    wishesSnap.docs.sort((a, b) => (b.data().createdAt?.toDate?.() ?? new Date(0)).getTime() - (a.data().createdAt?.toDate?.() ?? new Date(0)).getTime());
+    wishesSnap.docs.splice(12);
+    wishesRaw = await Promise.all(
+      wishesSnap.docs.map(async (doc: any) => {
+        const w = doc.data() as any;
+        const eDoc = await adminDb.collection("Employee").doc(w.fromId).get();
+        return { id: doc.id, ...w, createdAt: toDate(w.createdAt), fromEmployee: { name: eDoc.exists ? eDoc.data()!.name : "Unknown" } };
       })
-    : [];
+    );
+  }
+
   const nameById = new Map(allPeople.map((p) => [p.id, p.name]));
   const wishes = wishesRaw.map((w) => ({
     id: w.id,
@@ -144,18 +180,32 @@ export default async function Dashboard() {
     when: relativeTime(w.createdAt),
   }));
 
-  // Star of the month — latest period across the company
-  const latestPeriod = await prisma.monthlyScorecard.findFirst({
-    orderBy: [{ year: "desc" }, { month: "desc" }],
-  });
-  const starBoard = latestPeriod
-    ? await prisma.monthlyScorecard.findMany({
-        where: { year: latestPeriod.year, month: latestPeriod.month },
-        orderBy: { total: "desc" },
-        take: 6,
-        include: { employee: { include: { role: true } } },
+  // Star of the month
+  const allPeriodsSnap = await adminDb.collection("MonthlyScorecard").get();
+  const allPeriodDocs = allPeriodsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
+  const latestPeriodSnap = { empty: allPeriodDocs.length === 0, docs: allPeriodDocs.slice(0, 1) };
+  const latestPeriod = latestPeriodSnap.empty ? null : latestPeriodSnap.docs[0].data() as any;
+  
+  let starBoard: any[] = [];
+  if (latestPeriod) {
+    const sbSnap = await adminDb.collection("MonthlyScorecard").where("year", "==", latestPeriod.year).where("month", "==", latestPeriod.month).get();
+    
+    // Sort in Javascript so we don't need a Firebase index!
+    const sortedDocs = sbSnap.docs.sort((a, b) => b.data().total - a.data().total).slice(0, 6);
+
+    starBoard = await Promise.all(
+      sortedDocs.map(async (doc) => {
+        const sb = doc.data() as any;
+        const eDoc = await adminDb.collection("Employee").doc(sb.employeeId).get();
+        let roleData = { title: "Unknown" };
+        if (eDoc.exists && eDoc.data()!.roleId) {
+          const rDoc = await adminDb.collection("Role").doc(eDoc.data()!.roleId).get();
+          if (rDoc.exists) roleData = rDoc.data() as any;
+        }
+        return { id: doc.id, ...sb, employee: { ...eDoc.data(), role: roleData } };
       })
-    : [];
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -218,6 +268,8 @@ export default async function Dashboard() {
       )}
 
       {celebrate && <Celebration name={user.name.split(" ")[0]} />}
+
+      <TaskAnalysisCard data={taskAnalysis} />
 
       {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -321,7 +373,13 @@ export default async function Dashboard() {
 
         {/* Star of month */}
         <Card>
-          <SectionTitle>
+          <SectionTitle
+            action={
+              <Link href="/leaderboard" className="text-xs font-medium text-blue-600 hover:underline">
+                Full leaderboard →
+              </Link>
+            }
+          >
             ⭐ Star board {latestPeriod ? `· ${monthLabel(latestPeriod.year, latestPeriod.month)}` : ""}
           </SectionTitle>
           <ol className="space-y-2">

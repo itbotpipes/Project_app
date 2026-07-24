@@ -1,6 +1,7 @@
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { monthStartOf, previousMonthStart } from "@/lib/date";
 import { computeAutoScores } from "@/lib/autoscore";
 import { Card, SectionTitle, Badge } from "../_components/ui";
@@ -25,26 +26,82 @@ export default async function ScoresPage({
   const monthValue = `${year}-${String(month).padStart(2, "0")}`;
   const monthLabel = periodStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
-  const employees = await prisma.employee.findMany({
-    where: companyWide ? { active: true } : { active: true, reportsToId: user.id },
-    include: { role: { include: { department: true } } },
-    orderBy: [{ role: { level: "asc" } }, { name: "asc" }],
-  });
+  let employeesSnap;
+  if (companyWide) {
+    employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+  } else {
+    employeesSnap = await adminDb.collection("Employee").where("active", "==", true).where("reportsToId", "==", user.id).get();
+  }
+  
+  const employees = await Promise.all(
+    employeesSnap.docs.map(async (doc) => {
+      const emp = doc.data() as any;
+      let roleData = { title: "Unknown", department: null as any };
+      if (emp.roleId) {
+        const roleDoc = await adminDb.collection("Role").doc(emp.roleId).get();
+        if (roleDoc.exists) {
+          const role = roleDoc.data()!;
+          roleData.title = role.title;
+          if (role.departmentId) {
+            const deptDoc = await adminDb.collection("Department").doc(role.departmentId).get();
+            if (deptDoc.exists) roleData.department = { name: deptDoc.data()!.name };
+          }
+        }
+      }
+      return { id: doc.id, ...emp, role: roleData };
+    })
+  );
+  employees.sort((a, b) => (a.role?.level ?? 99) - (b.role?.level ?? 99) || a.name.localeCompare(b.name));
+  
   const empIds = employees.map((e) => e.id);
+  const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
 
-  const [kpiTemplates, existingScores, tasks, reviews, behaviourReviews] = await Promise.all([
-    prisma.kpiTemplate.findMany({
-      where: { roleId: { in: [...new Set(employees.map((e) => e.roleId))] } },
-      orderBy: { orderIndex: "asc" },
-    }),
-    prisma.monthlyScore.findMany({ where: { employeeId: { in: empIds }, year, month } }),
-    prisma.task.findMany({
-      where: { assigneeId: { in: empIds }, createdAt: { gte: periodStart, lt: monthEnd } },
-      select: { assigneeId: true, kpiTemplateId: true, status: true, createdAt: true, completedAt: true, carryCount: true },
-    }),
-    prisma.yearlyReview.findMany({ where: { employeeId: { in: empIds }, year } }),
-    prisma.behaviourReview.findMany({ where: { employeeId: { in: empIds }, year, month } }),
-  ]);
+  // Batch query to handle "in" clauses (max 30 elements)
+  const chunkIds = (ids: string[]) => {
+    const chunks = [];
+    for (let i = 0; i < ids.length; i += 30) chunks.push(ids.slice(i, i + 30));
+    return chunks;
+  };
+
+  const kpiTemplates: any[] = [];
+  for (const chunk of chunkIds(roleIds)) {
+    const snap = await adminDb.collection("KpiTemplate").where("roleId", "in", chunk).get();
+    snap.docs.forEach((d: any) => kpiTemplates.push({ id: d.id, ...d.data() }));
+  }
+  kpiTemplates.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+
+  const existingScores: any[] = [];
+  const tasks: any[] = [];
+  const reviews: any[] = [];
+  const behaviourReviews: any[] = [];
+
+  for (const chunk of chunkIds(empIds)) {
+    const [scoresSnap, tasksSnap, reviewsSnap, behaviourSnap] = await Promise.all([
+      adminDb.collection("MonthlyScore").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
+      adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
+      adminDb.collection("YearlyReview").where("employeeId", "in", chunk).where("year", "==", year).get(),
+      adminDb.collection("BehaviourReview").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
+    ]);
+    const periodStartMs = periodStart.getTime();
+    const monthEndMs = monthEnd.getTime();
+    scoresSnap.docs.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
+    tasksSnap.docs.forEach((d: any) => {
+      const t = d.data();
+      const raw = t.createdAt;
+      const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+      if (createdAt.getTime() < periodStartMs || createdAt.getTime() >= monthEndMs) return;
+      tasks.push({
+        assigneeId: t.assigneeId,
+        kpiTemplateId: t.kpiTemplateId,
+        status: t.status,
+        createdAt,
+        completedAt: t.completedAt ? (t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
+        carryCount: t.carryCount ?? 0,
+      });
+    });
+    reviewsSnap.docs.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
+    behaviourSnap.docs.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
+  }
 
   const kpisByRole = new Map<string, typeof kpiTemplates>();
   for (const k of kpiTemplates) {
@@ -106,7 +163,7 @@ export default async function ScoresPage({
         <Card key={dept}>
           <SectionTitle>{dept}</SectionTitle>
           <div className="space-y-3">
-            {list.map((e) => {
+            {list.map((e: any) => {
               const kpis = kpisByRole.get(e.roleId) ?? [];
               const auto = computeAutoScores(
                 kpis.map((k) => ({ id: k.id, weightage: k.weightage })),
@@ -136,7 +193,7 @@ export default async function ScoresPage({
                 <details key={e.id} className="rounded-xl border border-slate-200">
                   <summary className="flex cursor-pointer flex-wrap items-center gap-3 p-3">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
-                      {e.name.split(" ").map((p) => p[0]).slice(0, 2).join("").toUpperCase()}
+                      {e.name.split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
                     </div>
                     <div className="min-w-[9rem]">
                       <div className="text-sm font-medium">{e.name}</div>
@@ -152,6 +209,12 @@ export default async function ScoresPage({
                       >
                         Final {Math.round(finalTotal)}
                       </Badge>
+                      <Link
+                        href={`/people/${e.id}`}
+                        className="rounded-full border border-slate-200 px-2 py-0.5 text-xs text-blue-600 hover:bg-blue-50"
+                      >
+                        📈 Trend
+                      </Link>
                       <span className="text-xs text-slate-400">▼</span>
                     </div>
                   </summary>

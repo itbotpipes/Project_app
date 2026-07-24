@@ -1,8 +1,8 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase/admin";
 
 function startOfToday() {
   const d = new Date();
@@ -15,19 +15,35 @@ export async function markMorningPlanned() {
   if (!user) return;
   const date = startOfToday();
 
-  // Snapshot which tasks are open right now — "the plan" — so end-of-day we can
-  // tell what was planned vs. what got done instead (ad-hoc/urgent additions).
-  const openTasks = await prisma.task.findMany({
-    where: { assigneeId: user.id, status: { notIn: ["CLOSED"] } },
-    select: { id: true },
-  });
-  const plannedTaskIds = JSON.stringify(openTasks.map((t) => t.id));
+  const openSnap = await adminDb.collection("Task")
+    .where("assigneeId", "==", user.id)
+    .where("status", "!=", "CLOSED")
+    .get();
+  const plannedTaskIds = JSON.stringify(openSnap.docs.map((d) => d.id));
 
-  await prisma.dailyRitual.upsert({
-    where: { employeeId_date: { employeeId: user.id, date } },
-    create: { employeeId: user.id, date, morningPlanned: true, plannedTaskIds },
-    update: { morningPlanned: true, plannedTaskIds },
-  });
+  const existSnap = await adminDb.collection("DailyRitual")
+    .where("employeeId", "==", user.id)
+    .where("date", "==", date)
+    .limit(1)
+    .get();
+
+  if (!existSnap.empty) {
+    await adminDb.collection("DailyRitual").doc(existSnap.docs[0].id).update({
+      morningPlanned: true,
+      plannedTaskIds,
+      updatedAt: new Date(),
+    });
+  } else {
+    await adminDb.collection("DailyRitual").add({
+      employeeId: user.id,
+      date,
+      morningPlanned: true,
+      eveningClosed: false,
+      plannedTaskIds,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
   revalidatePath("/");
 }
 
@@ -35,10 +51,27 @@ export async function markEveningClosed() {
   const user = await getCurrentUser();
   if (!user) return;
   const date = startOfToday();
-  await prisma.dailyRitual.upsert({
-    where: { employeeId_date: { employeeId: user.id, date } },
-    create: { employeeId: user.id, date, eveningClosed: true },
-    update: { eveningClosed: true },
-  });
+
+  const existSnap = await adminDb.collection("DailyRitual")
+    .where("employeeId", "==", user.id)
+    .where("date", "==", date)
+    .limit(1)
+    .get();
+
+  if (!existSnap.empty) {
+    await adminDb.collection("DailyRitual").doc(existSnap.docs[0].id).update({
+      eveningClosed: true,
+      updatedAt: new Date(),
+    });
+  } else {
+    await adminDb.collection("DailyRitual").add({
+      employeeId: user.id,
+      date,
+      morningPlanned: false,
+      eveningClosed: true,
+      createdAt: new Date(),
+      updatedAt: new Date(),
+    });
+  }
   revalidatePath("/");
 }

@@ -1,15 +1,14 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase/admin";
 
-// Admin, CEO, and HR can manage the board + thought of the day.
 function canManage(user: { systemRole: string; role: { title: string } }) {
   return (
     user.systemRole === "ADMIN" ||
     user.systemRole === "CEO" ||
-    user.role.title.toLowerCase().includes("hr")
+    (user.role && user.role.title && user.role.title.toLowerCase().includes("hr"))
   );
 }
 
@@ -19,15 +18,26 @@ export async function saveThought(formData: FormData) {
   const body = String(formData.get("body") || "").trim();
   if (!body) return { error: "Write a thought first" };
 
-  // keep a single pinned thought — update the latest, else create
-  const existing = await prisma.announcement.findFirst({
-    where: { kind: "THOUGHT" },
-    orderBy: { createdAt: "desc" },
-  });
-  if (existing) {
-    await prisma.announcement.update({ where: { id: existing.id }, data: { body, authorId: user.id } });
+  const thoughtSnap = await adminDb.collection("Announcement")
+    .where("kind", "==", "THOUGHT")
+    .orderBy("createdAt", "desc")
+    .limit(1)
+    .get();
+
+  if (!thoughtSnap.empty) {
+    await adminDb.collection("Announcement").doc(thoughtSnap.docs[0].id).update({
+      body,
+      authorId: user.id,
+      updatedAt: new Date(),
+    });
   } else {
-    await prisma.announcement.create({ data: { kind: "THOUGHT", pinned: true, body, authorId: user.id } });
+    await adminDb.collection("Announcement").add({
+      kind: "THOUGHT",
+      pinned: true,
+      body,
+      authorId: user.id,
+      createdAt: new Date(),
+    });
   }
   revalidatePath("/");
   revalidatePath("/announcements");
@@ -40,9 +50,15 @@ export async function createAnnouncement(formData: FormData) {
   const title = String(formData.get("title") || "").trim() || null;
   const body = String(formData.get("body") || "").trim();
   if (!body) return { error: "Message is required" };
-  await prisma.announcement.create({
-    data: { kind: "NOTICE", title, body, authorId: user.id },
+  
+  await adminDb.collection("Announcement").add({
+    kind: "NOTICE",
+    title,
+    body,
+    authorId: user.id,
+    createdAt: new Date(),
   });
+  
   revalidatePath("/");
   revalidatePath("/announcements");
   return { ok: true };
@@ -55,7 +71,13 @@ export async function updateAnnouncement(formData: FormData) {
   const title = String(formData.get("title") || "").trim() || null;
   const body = String(formData.get("body") || "").trim();
   if (!id || !body) return { error: "Message is required" };
-  await prisma.announcement.update({ where: { id }, data: { title, body } });
+  
+  await adminDb.collection("Announcement").doc(id).update({
+    title,
+    body,
+    updatedAt: new Date(),
+  });
+  
   revalidatePath("/");
   revalidatePath("/announcements");
   return { ok: true };
@@ -66,7 +88,9 @@ export async function deleteAnnouncement(formData: FormData) {
   if (!user || !canManage(user)) return;
   const id = String(formData.get("id") || "");
   if (!id) return;
-  await prisma.announcement.delete({ where: { id } });
+  
+  await adminDb.collection("Announcement").doc(id).delete();
+  
   revalidatePath("/");
   revalidatePath("/announcements");
 }

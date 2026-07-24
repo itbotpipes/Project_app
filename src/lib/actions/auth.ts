@@ -1,7 +1,7 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { createSession, destroySession, verifyPassword } from "@/lib/auth";
 
 export async function loginAction(_prev: unknown, formData: FormData) {
@@ -9,11 +9,16 @@ export async function loginAction(_prev: unknown, formData: FormData) {
   const password = String(formData.get("password") || "");
   if (!email || !password) return { error: "Enter email and password." };
 
-  const user = await prisma.employee.findUnique({ where: { email } });
-  if (!user || !user.active || !(await verifyPassword(password, user.passwordHash))) {
+  const snap = await adminDb.collection("Employee").where("email", "==", email).limit(1).get();
+  if (snap.empty) return { error: "Invalid email or password." };
+  
+  const userDoc = snap.docs[0];
+  const user = userDoc.data();
+  
+  if (!user.active || !(await verifyPassword(password, user.passwordHash))) {
     return { error: "Invalid email or password." };
   }
-  await createSession(user.id);
+  await createSession(userDoc.id);
   redirect("/");
 }
 

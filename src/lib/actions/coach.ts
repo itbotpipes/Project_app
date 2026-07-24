@@ -1,31 +1,52 @@
 "use server";
 
-import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase/admin";
 import { mondayOf } from "@/lib/date";
 import { computeWeeklyInsights } from "@/lib/insights";
 
 async function gatherContext(userId: string, roleId: string) {
   const weekStart = mondayOf();
-  const [tasks, buckets] = await Promise.all([
-    prisma.task.findMany({
-      where: { assigneeId: userId, createdAt: { gte: weekStart } },
-      select: { status: true, createdAt: true, completedAt: true, carryCount: true, kpiTemplate: { select: { kpiName: true } } },
-    }),
-    prisma.kpiTemplate.count({ where: { roleId } }),
+  const weekStartMs = weekStart.getTime();
+  const [allTasksSnap, kpisSnap] = await Promise.all([
+    adminDb.collection("Task").where("assigneeId", "==", userId).get(),
+    adminDb.collection("KpiTemplate").where("roleId", "==", roleId).get(),
   ]);
-  const insights = computeWeeklyInsights(
-    tasks.map((t) => ({ status: t.status, createdAt: t.createdAt, completedAt: t.completedAt, carryCount: t.carryCount, kpiName: t.kpiTemplate?.kpiName ?? null })),
-    buckets,
+
+  // Filter to this week in JS — no composite index needed
+  const weeklyDocs = allTasksSnap.docs.filter((doc) => {
+    const raw = doc.data().createdAt;
+    const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+    return createdAt.getTime() >= weekStartMs;
+  });
+
+  const tasks = await Promise.all(
+    weeklyDocs.map(async (doc) => {
+      const t = doc.data();
+      let kpiName: string | null = null;
+      if (t.kpiTemplateId) {
+        const kpiDoc = await adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get();
+        kpiName = kpiDoc.exists ? kpiDoc.data()!.kpiName : null;
+      }
+      return {
+        status: t.status,
+        createdAt: t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt),
+        completedAt: t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
+        carryCount: t.carryCount ?? 0,
+        kpiName,
+      };
+    })
   );
+
+  const buckets = kpisSnap.size;
+  const insights = computeWeeklyInsights(tasks, buckets);
   return insights;
 }
 
-/** Heuristic fallback reply built from the employee's own numbers + intent keywords. */
 function heuristicReply(message: string, ins: Awaited<ReturnType<typeof gatherContext>>): string {
   const m = message.toLowerCase();
   const s = ins.stats;
-  const lead = `This week you created ${s.created} tasks, completed ${s.completed}, and worked ${s.bucketsWorked} KPI area${s.bucketsWorked === 1 ? "" : "s"}${s.topBucket ? ` (mostly “${s.topBucket}”)` : ""}.`;
+  const lead = `This week you created ${s.created} tasks, completed ${s.completed}, and worked ${s.bucketsWorked} KPI area${s.bucketsWorked === 1 ? "" : "s"}${s.topBucket ? ` (mostly "${s.topBucket}")` : ""}.`;
 
   let advice: string;
   if (/improv|better|suggest|tip|advice|grow|promot/.test(m)) {

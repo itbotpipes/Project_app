@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth";
-import { prisma } from "@/lib/db";
+import { adminDb } from "@/lib/firebase/admin";
 import { mondayOf } from "@/lib/date";
 import { computeWeeklyInsights } from "@/lib/insights";
 import { Card, SectionTitle } from "../_components/ui";
@@ -10,13 +10,33 @@ export default async function InsightsPage() {
   if (!user) return null;
 
   const weekStart = mondayOf();
-  const [tasks, buckets] = await Promise.all([
-    prisma.task.findMany({
-      where: { assigneeId: user.id, createdAt: { gte: weekStart } },
-      select: { status: true, createdAt: true, completedAt: true, carryCount: true, kpiTemplate: { select: { kpiName: true } } },
-    }),
-    prisma.kpiTemplate.count({ where: { roleId: user.roleId } }),
+  const weekStartMs = weekStart.getTime();
+  const [allTasksSnap, kpisSnap] = await Promise.all([
+    adminDb.collection("Task").where("assigneeId", "==", user.id).get(),
+    adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
   ]);
+
+  // Filter to this week in JS — no composite index needed
+  const tasksSnap = { docs: allTasksSnap.docs.filter((d) => {
+    const raw = d.data().createdAt;
+    const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+    return createdAt.getTime() >= weekStartMs;
+  }) };
+
+  const tasks = await Promise.all(
+    tasksSnap.docs.map(async (doc) => {
+      const t = doc.data() as any;
+      let kpiName: string | null = null;
+      if (t.kpiTemplateId) {
+        const kpiDoc = await adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get();
+        if (kpiDoc.exists) kpiName = kpiDoc.data()!.kpiName;
+      }
+      const createdAt = t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt);
+      const completedAt = t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null;
+      return { status: t.status, createdAt, completedAt, carryCount: t.carryCount ?? 0, kpiName };
+    })
+  );
+  const buckets = kpisSnap.size;
 
   const insights = computeWeeklyInsights(
     tasks.map((t) => ({
@@ -24,7 +44,7 @@ export default async function InsightsPage() {
       createdAt: t.createdAt,
       completedAt: t.completedAt,
       carryCount: t.carryCount,
-      kpiName: t.kpiTemplate?.kpiName ?? null,
+      kpiName: t.kpiName,
     })),
     buckets,
   );

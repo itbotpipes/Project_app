@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   KanbanSquare,
   Users,
+  Users2,
   TrendingUp,
   Contact,
   Sparkles,
@@ -14,6 +15,11 @@ import {
   ClipboardCheck,
   Trophy,
   Megaphone,
+  Share2,
+  Bell,
+  BookmarkCheck,
+  Trash2,
+  Activity,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -33,6 +39,11 @@ export default function Sidebar({
   const items: Item[] = [
     { href: "/", label: "Dashboard", icon: LayoutDashboard },
     { href: "/board", label: "My Board", icon: KanbanSquare },
+    { href: "/groups", label: "Groups", icon: Users2 },
+    ...(showManager ? [{ href: "/delegated", label: "Delegated Tasks", icon: Share2 }] : []),
+    { href: "/subscribed", label: "Subscribed Tasks", icon: Bell },
+    { href: "/templates", label: "Task Templates", icon: BookmarkCheck },
+    { href: "/deleted", label: "Deleted Tasks", icon: Trash2 },
     ...(showManager ? [{ href: "/team", label: "My Team", icon: Users }] : []),
     { href: "/performance", label: "Performance", icon: TrendingUp },
     { href: "/insights", label: "AI Insights", icon: Sparkles },
@@ -40,7 +51,8 @@ export default function Sidebar({
     ...(showScoring ? [{ href: "/scores", label: "Score Panel", icon: ClipboardCheck }] : []),
     ...(showScoring ? [{ href: "/announcements", label: "Announcements", icon: Megaphone }] : []),
     ...(showManager ? [{ href: "/people", label: "Directory", icon: Contact }] : []),
-    ...(showAdmin ? [{ href: "/leaderboard", label: "Leaderboard", icon: Trophy }] : []),
+    { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
+    { href: "/activities", label: "Activities", icon: Activity },
     ...(showAdmin ? [{ href: "/admin", label: "Admin", icon: Settings }] : []),
   ];
 

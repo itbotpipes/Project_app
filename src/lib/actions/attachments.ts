@@ -1,10 +1,16 @@
 "use server";
 
-import { writeFile, mkdir } from "fs/promises";
-import path from "path";
 import { revalidatePath } from "next/cache";
-import { prisma } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { adminDb } from "@/lib/firebase/admin";
+import { v2 as cloudinary } from "cloudinary";
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 export async function addComment(formData: FormData) {
   const user = await getCurrentUser();
@@ -12,10 +18,26 @@ export async function addComment(formData: FormData) {
   const taskId = String(formData.get("taskId") || "");
   const body = String(formData.get("body") || "").trim();
   if (!taskId || !body) return;
-  await prisma.taskComment.create({ data: { taskId, authorId: user.id, body } });
-  await prisma.auditLog.create({
-    data: { actorId: user.id, action: "task.comment", entity: "Task", entityId: taskId },
+  
+  const now = new Date();
+  
+  // Save comment to Firestore
+  await adminDb.collection("TaskComment").add({
+    taskId,
+    authorId: user.id,
+    body,
+    createdAt: now,
   });
+  
+  // Save audit log to Firestore
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "task.comment",
+    entity: "Task",
+    entityId: taskId,
+    createdAt: now,
+  });
+  
   revalidatePath(`/task/${taskId}`);
 }
 
@@ -25,10 +47,23 @@ export async function createReminder(formData: FormData) {
   const taskId = String(formData.get("taskId") || "");
   const remindAtRaw = String(formData.get("remindAt") || "");
   if (!taskId || !remindAtRaw) return { error: "Pick a date & time" };
-  await prisma.reminder.create({ data: { taskId, remindAt: new Date(remindAtRaw) } });
-  await prisma.auditLog.create({
-    data: { actorId: user.id, action: "task.remind", entity: "Task", entityId: taskId },
+  
+  const now = new Date();
+  
+  await adminDb.collection("Reminder").add({
+    taskId,
+    remindAt: new Date(remindAtRaw),
+    sent: false,
   });
+  
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "task.remind",
+    entity: "Task",
+    entityId: taskId,
+    createdAt: now,
+  });
+  
   revalidatePath(`/task/${taskId}`);
   return { ok: true };
 }
@@ -39,7 +74,11 @@ export async function dismissReminder(formData: FormData) {
   const id = String(formData.get("id") || "");
   const taskId = String(formData.get("taskId") || "");
   if (!id) return;
-  await prisma.reminder.update({ where: { id }, data: { sent: true } });
+  
+  await adminDb.collection("Reminder").doc(id).update({
+    sent: true,
+  });
+  
   revalidatePath(`/task/${taskId}`);
   revalidatePath("/");
 }
@@ -53,19 +92,46 @@ export async function uploadTaskAttachment(formData: FormData) {
   if (!taskId || !file || file.size === 0) return { error: "No file" };
   if (file.size > 15 * 1024 * 1024) return { error: "File too large (max 15MB)" };
 
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const safe = (file.name || "upload").replace(/[^\w.\-]/g, "_");
-  const filename = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}-${safe}`;
-  const dir = path.join(process.cwd(), "public", "uploads");
-  await mkdir(dir, { recursive: true });
-  await writeFile(path.join(dir, filename), bytes);
+  try {
+    const bytes = Buffer.from(await file.arrayBuffer());
+    
+    // Upload to Cloudinary using a promise wrapper
+    const uploadResult = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { folder: "taskflow_uploads", resource_type: "auto" },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      uploadStream.end(bytes);
+    }) as any;
 
-  await prisma.attachment.create({
-    data: { taskId, kind, url: `/uploads/${filename}`, filename: file.name || filename },
-  });
-  await prisma.auditLog.create({
-    data: { actorId: user.id, action: "task.attach", entity: "Task", entityId: taskId, detail: kind },
-  });
-  revalidatePath(`/task/${taskId}`);
-  return { ok: true };
+    const secureUrl = uploadResult.secure_url;
+    const now = new Date();
+
+    // Save attachment to Firestore
+    await adminDb.collection("Attachment").add({
+      taskId,
+      kind,
+      url: secureUrl,
+      filename: file.name || "upload",
+      createdAt: now,
+    });
+    
+    await adminDb.collection("AuditLog").add({
+      actorId: user.id,
+      action: "task.attach",
+      entity: "Task",
+      entityId: taskId,
+      detail: kind,
+      createdAt: now,
+    });
+    
+    revalidatePath(`/task/${taskId}`);
+    return { ok: true };
+  } catch (error) {
+    console.error("Cloudinary upload error:", error);
+    return { error: "Upload failed" };
+  }
 }

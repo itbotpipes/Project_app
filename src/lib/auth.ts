@@ -2,7 +2,6 @@ import "server-only";
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
-import { prisma } from "./db";
 
 const COOKIE = "ops_session";
 const secret = new TextEncoder().encode(
@@ -49,17 +48,36 @@ async function getSessionEmployeeId(): Promise<string | null> {
   }
 }
 
-export type CurrentUser = Awaited<ReturnType<typeof getCurrentUser>>;
+import { adminDb } from "./firebase/admin";
+
+export type CurrentUser = any; // Will be properly typed when we rewrite the Employee model
 
 export async function getCurrentUser() {
   const id = await getSessionEmployeeId();
   if (!id) return null;
-  const user = await prisma.employee.findUnique({
-    where: { id },
-    include: { role: { include: { department: true } } },
-  });
-  if (!user || !user.active) return null;
-  return user;
+  
+  const userDoc = await adminDb.collection("Employee").doc(id).get();
+  if (!userDoc.exists) return null;
+  
+  const userData = userDoc.data();
+  if (!userData || !userData.active) return null;
+  
+  // Note: Resolving relations manually since Firestore is NoSQL
+  let roleData = null;
+  if (userData.roleId) {
+    const roleDoc = await adminDb.collection("Role").doc(userData.roleId).get();
+    if (roleDoc.exists) {
+      roleData = roleDoc.data();
+      if (roleData && roleData.departmentId) {
+        const deptDoc = await adminDb.collection("Department").doc(roleData.departmentId).get();
+        if (deptDoc.exists) {
+          roleData.department = deptDoc.data();
+        }
+      }
+    }
+  }
+  
+  return { id, ...userData, role: roleData } as any;
 }
 
 export function isManagerLike(systemRole: string) {

@@ -1,12 +1,13 @@
 "use client";
 
 import { useState, useTransition } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { moveTask } from "@/lib/actions/tasks";
+import { Trash2 } from "lucide-react";
+import { moveTask, softDeleteTask } from "@/lib/actions/tasks";
 import { priorityQuadrant, TASK_STATUS_LABEL } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import MoveControl from "./MoveControl";
+import TaskLink from "../_components/TaskLink";
 
 export type BoardTask = {
   id: string;
@@ -20,9 +21,12 @@ export type BoardTask = {
   holdReason: string | null;
   reviewRequired: boolean;
   carryCount: number;
+  reworkCount: number;
   kpiName: string | null;
   projectName: string | null;
   delegatedBy: string | null;
+  checklistTotal?: number;
+  checklistDone?: number;
 };
 
 const COLUMN_TINT: Record<string, string> = {
@@ -69,6 +73,8 @@ export default function KanbanBoard({
     }
 
     // optimistic update
+    const prevStatus = task.status;
+    const prevHoldReason = task.holdReason;
     setTasks((prev) =>
       prev.map((t) => (t.id === taskId ? { ...t, status: newStatus, holdReason: holdReason ?? t.holdReason } : t)),
     );
@@ -78,7 +84,26 @@ export default function KanbanBoard({
     fd.set("status", newStatus);
     if (holdReason) fd.set("holdReason", holdReason);
     startTransition(async () => {
-      await moveTask(fd);
+      const res = await moveTask(fd);
+      if (res && "error" in res && res.error) {
+        // revert the optimistic move and tell the user why
+        setTasks((prev) =>
+          prev.map((t) => (t.id === taskId ? { ...t, status: prevStatus, holdReason: prevHoldReason } : t)),
+        );
+        window.alert(res.error);
+        return;
+      }
+      router.refresh();
+    });
+  }
+
+  function removeTask(taskId: string) {
+    if (!window.confirm("Move this task to Deleted Tasks? You can restore it any time.")) return;
+    setTasks((prev) => prev.filter((t) => t.id !== taskId));
+    const fd = new FormData();
+    fd.set("taskId", taskId);
+    startTransition(async () => {
+      await softDeleteTask(fd);
       router.refresh();
     });
   }
@@ -142,13 +167,29 @@ export default function KanbanBoard({
                     dragId === task.id && "opacity-50",
                   )}
                 >
-                  <Link
-                    href={`/task/${task.id}`}
-                    draggable={false}
-                    className="text-sm font-medium leading-snug text-slate-900 hover:text-blue-600 hover:underline"
-                  >
-                    {task.title}
-                  </Link>
+                  <div className="flex items-start justify-between gap-1">
+                    <TaskLink
+                      taskId={task.id}
+                      draggable={false}
+                      className="text-sm font-medium leading-snug text-slate-900 hover:text-blue-600 hover:underline"
+                    >
+                      {task.title}
+                    </TaskLink>
+                    <button
+                      type="button"
+                      draggable={false}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        removeTask(task.id);
+                      }}
+                      className="shrink-0 text-slate-300 hover:text-red-500"
+                      aria-label="Delete task"
+                      title="Delete task"
+                    >
+                      <Trash2 size={13} />
+                    </button>
+                  </div>
 
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", quadTone[quad])}>{quad}</span>
@@ -170,9 +211,26 @@ export default function KanbanBoard({
                         ↻ carried {task.carryCount}×
                       </span>
                     )}
+                    {task.reworkCount > 0 && (
+                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
+                        ↩ reworked {task.reworkCount}×
+                      </span>
+                    )}
                     {task.delegatedBy && (
                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
                         ↪ {task.delegatedBy}
+                      </span>
+                    )}
+                    {!!task.checklistTotal && (
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-xs font-medium",
+                          task.checklistDone === task.checklistTotal
+                            ? "bg-emerald-100 text-emerald-700"
+                            : "bg-slate-100 text-slate-600",
+                        )}
+                      >
+                        ☑ {task.checklistDone}/{task.checklistTotal}
                       </span>
                     )}
                   </div>

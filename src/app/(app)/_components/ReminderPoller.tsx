@@ -1,9 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Link from "next/link";
 import { BellRing, X } from "lucide-react";
 import { dismissReminder } from "@/lib/actions/attachments";
+import TaskLink from "./TaskLink";
 
 type Due = { id: string; taskId: string; title: string; remindAt: string };
 
@@ -82,13 +82,13 @@ export default function ReminderPoller() {
             <BellRing size={18} className="mt-0.5 shrink-0 text-blue-500" />
             <div className="min-w-0 flex-1">
               <div className="text-sm font-medium text-slate-900">Task reminder</div>
-              <Link
-                href={`/task/${r.taskId}`}
-                onClick={() => dismiss(r)}
+              <TaskLink
+                taskId={r.taskId}
+                onClickCapture={() => dismiss(r)}
                 className="text-sm text-blue-600 hover:underline"
               >
                 {r.title}
-              </Link>
+              </TaskLink>
             </div>
             <button onClick={() => dismiss(r)} className="shrink-0 text-slate-400 hover:text-slate-700" aria-label="Dismiss">
               <X size={15} />
