@@ -62,22 +62,51 @@ export async function getCurrentUser() {
   const userData = userDoc.data();
   if (!userData || !userData.active) return null;
   
+  // Convert Firestore Timestamps to Dates for serialization
+  const serializedUser: any = {};
+  for (const [key, value] of Object.entries(userData)) {
+    if (value && typeof value === 'object' && 'toDate' in value) {
+      serializedUser[key] = (value as any).toDate();
+    } else {
+      serializedUser[key] = value;
+    }
+  }
+  
   // Note: Resolving relations manually since Firestore is NoSQL
-  let roleData = null;
-  if (userData.roleId) {
-    const roleDoc = await adminDb.collection("Role").doc(userData.roleId).get();
+  let roleData: any = null;
+  if (serializedUser.roleId) {
+    const roleDoc = await adminDb.collection("Role").doc(serializedUser.roleId).get();
     if (roleDoc.exists) {
-      roleData = roleDoc.data();
+      const rawRoleData = roleDoc.data();
+      // Convert role data timestamps
+      roleData = {};
+      for (const [key, value] of Object.entries(rawRoleData || {})) {
+        if (value && typeof value === 'object' && 'toDate' in value) {
+          (roleData as any)[key] = (value as any).toDate();
+        } else {
+          (roleData as any)[key] = value;
+        }
+      }
       if (roleData && roleData.departmentId) {
         const deptDoc = await adminDb.collection("Department").doc(roleData.departmentId).get();
         if (deptDoc.exists) {
-          roleData.department = deptDoc.data();
+          const rawDeptData = deptDoc.data();
+          // Convert department data timestamps
+          const deptData: any = {};
+          for (const [key, value] of Object.entries(rawDeptData || {})) {
+            if (value && typeof value === 'object' && 'toDate' in value) {
+              deptData[key] = (value as any).toDate();
+            } else {
+              deptData[key] = value;
+            }
+          }
+          roleData.department = deptData;
         }
       }
     }
   }
   
-  return { id, ...userData, role: roleData } as any;
+  return { id, ...serializedUser, role: roleData } as any;
 }
 
 export function isManagerLike(systemRole: string) {
