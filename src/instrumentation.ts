@@ -14,14 +14,15 @@ export async function register() {
   if (g.__opsScheduler) return;
   g.__opsScheduler = true;
 
-  const { runDailyJobs } = await import("@/lib/jobs/dailyJobs");
-
   let lastRunDay = "";
   const tick = async () => {
     const today = new Date().toISOString().slice(0, 10);
     if (today === lastRunDay) return;
     lastRunDay = today;
     try {
+      // Lazy load dailyJobs only when actually running to avoid ES module issues
+      // with firebase-admin during instrumentation hook initialization
+      const { runDailyJobs } = await import("@/lib/jobs/dailyJobs");
       const result = await runDailyJobs();
       console.log(`[scheduler] daily jobs ran: ${result.carried} task(s) carried forward`);
     } catch (err) {
