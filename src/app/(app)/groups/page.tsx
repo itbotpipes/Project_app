@@ -15,7 +15,18 @@ export default async function GroupsPage() {
   ]);
 
   const departments = departmentsSnap.docs
-    .map((d) => ({ id: d.id, ...d.data() }))
+    .map((d) => {
+      const data = d.data();
+      const serialized: any = { id: d.id };
+      for (const [key, value] of Object.entries(data)) {
+        if (value && typeof value === 'object' && 'toDate' in value) {
+          serialized[key] = (value as any).toDate();
+        } else {
+          serialized[key] = value;
+        }
+      }
+      return serialized;
+    })
     .sort((a: any, b: any) => a.name.localeCompare(b.name)) as any[];
   const people = peopleSnap.docs
     .map((d) => ({ id: d.id, name: d.data().name }))
@@ -25,21 +36,45 @@ export default async function GroupsPage() {
   const groups = (await Promise.all(
     groupsSnap.docs.map(async (doc) => {
       const g = doc.data() as any;
+      // Serialize Group data timestamps
+      const serializedGroup: any = {};
+      for (const [key, value] of Object.entries(g)) {
+        if (value && typeof value === 'object' && 'toDate' in value) {
+          serializedGroup[key] = (value as any).toDate();
+        } else {
+          serializedGroup[key] = value;
+        }
+      }
       const [membersSnap, openTasksSnap, doneTasksSnap, deptDoc] = await Promise.all([
         adminDb.collection("GroupMember").where("groupId", "==", doc.id).get(),
         adminDb.collection("Task").where("groupId", "==", doc.id).where("deletedAt", "==", null).where("status", "!=", "CLOSED").get(),
         adminDb.collection("Task").where("groupId", "==", doc.id).where("deletedAt", "==", null).where("status", "==", "CLOSED").get(),
-        g.departmentId ? adminDb.collection("Department").doc(g.departmentId).get() : Promise.resolve(null),
+        serializedGroup.departmentId ? adminDb.collection("Department").doc(serializedGroup.departmentId).get() : Promise.resolve(null),
       ]);
+      // Serialize department data if exists
+      let department = null;
+      if (deptDoc?.exists) {
+        const deptData = deptDoc.data();
+        const serializedDept: any = {};
+        for (const [key, value] of Object.entries(deptData || {})) {
+          if (value && typeof value === 'object' && 'toDate' in value) {
+            serializedDept[key] = (value as any).toDate();
+          } else {
+            serializedDept[key] = value;
+          }
+        }
+        department = { name: serializedDept.name };
+      }
+
       return {
         id: doc.id,
-        name: g.name,
-        description: g.description ?? null,
-        departmentId: g.departmentId,
+        name: serializedGroup.name,
+        description: serializedGroup.description ?? null,
+        departmentId: serializedGroup.departmentId,
         members: membersSnap.docs.map((m) => ({ employeeId: m.data().employeeId })),
         openCount: openTasksSnap.size,
         doneCount: doneTasksSnap.size,
-        department: deptDoc?.exists ? { name: deptDoc.data()!.name } : null,
+        department,
       };
     })
   )).sort((a, b) => a.name.localeCompare(b.name));
