@@ -20,7 +20,7 @@ export default async function GroupsPage() {
   ]);
 
   const departments = departmentsMap.docs ? departmentsMap.docs
-    .map((d) => {
+    .map((d: any) => {
       const data = d.data();
       const serialized: any = { id: d.id };
       for (const [key, value] of Object.entries(data)) {

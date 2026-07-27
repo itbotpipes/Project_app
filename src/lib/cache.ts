@@ -1,16 +1,144 @@
 import { unstable_cache } from 'next/cache';
 
+function serializeValue(val: any): any {
+  if (!val) return val;
+  
+  if (typeof val === 'object') {
+    if (typeof val.toDate === 'function') {
+      const d = val.toDate();
+      return {
+        __type: 'Timestamp',
+        seconds: Math.floor(d.getTime() / 1000),
+        nanoseconds: (d.getTime() % 1000) * 1000000,
+      };
+    }
+    
+    if (val instanceof Date) {
+      return {
+        __type: 'Date',
+        value: val.toISOString(),
+      };
+    }
+    
+    if (Array.isArray(val)) {
+      return val.map(serializeValue);
+    }
+    
+    const res: any = {};
+    for (const key of Object.keys(val)) {
+      res[key] = serializeValue(val[key]);
+    }
+    return res;
+  }
+  
+  return val;
+}
+
+function serializeSnapshot(val: any): any {
+  if (!val || typeof val !== 'object') return val;
+
+  if (Array.isArray(val.docs)) {
+    return {
+      __type: 'QuerySnapshot',
+      docs: val.docs.map((doc: any) => ({
+        id: doc.id,
+        exists: typeof doc.exists === 'boolean' ? doc.exists : true,
+        data: serializeValue(typeof doc.data === 'function' ? doc.data() : (doc.data || null)),
+      })),
+    };
+  }
+
+  if (typeof val.exists === 'boolean' && typeof val.data === 'function' && 'id' in val) {
+    return {
+      __type: 'DocumentSnapshot',
+      id: val.id,
+      exists: val.exists,
+      data: serializeValue(val.exists ? val.data() : null),
+    };
+  }
+
+  return serializeValue(val);
+}
+
+function deserializeValue(val: any): any {
+  if (!val || typeof val !== 'object') return val;
+  
+  if (val.__type === 'Timestamp') {
+    return {
+      seconds: val.seconds,
+      nanoseconds: val.nanoseconds,
+      toDate: () => new Date(val.seconds * 1000 + val.nanoseconds / 1000000),
+      toString: () => new Date(val.seconds * 1000 + val.nanoseconds / 1000000).toString(),
+    };
+  }
+  
+  if (val.__type === 'Date') {
+    return new Date(val.value);
+  }
+  
+  if (Array.isArray(val)) {
+    return val.map(deserializeValue);
+  }
+  
+  const res: any = {};
+  for (const key of Object.keys(val)) {
+    res[key] = deserializeValue(val[key]);
+  }
+  return res;
+}
+
+function deserializeSnapshot(val: any): any {
+  if (!val || typeof val !== 'object') return val;
+
+  if (val.__type === 'QuerySnapshot') {
+    const docs = (val.docs || []).map((doc: any) => ({
+      id: doc.id,
+      exists: doc.exists,
+      data: () => deserializeValue(doc.data),
+      get: (field: string) => deserializeValue(doc.data?.[field]),
+    }));
+    return {
+      docs,
+      empty: docs.length === 0,
+      size: docs.length,
+      forEach(callback: any) {
+        docs.forEach(callback);
+      },
+    };
+  }
+
+  if (val.__type === 'DocumentSnapshot') {
+    return {
+      id: val.id,
+      exists: val.exists,
+      data: () => deserializeValue(val.data),
+      get: (field: string) => deserializeValue(val.data?.[field]),
+    };
+  }
+
+  return deserializeValue(val);
+}
+
 /**
  * Cached data fetching utility for Firestore queries
  * Uses Next.js unstable_cache to cache results and revalidate after specified time
  */
-
-export function cachedFetch<T>(
+export async function cachedFetch<T>(
   key: string,
   fn: () => Promise<T>,
   revalidateSeconds: number = 60
 ): Promise<T> {
-  return unstable_cache(fn, [key], { revalidate: revalidateSeconds })();
+  const cachedFn = unstable_cache(
+    async () => {
+      const res = await fn();
+      return serializeSnapshot(res);
+    },
+    [key],
+    { revalidate: revalidateSeconds }
+  );
+
+  const serializedResult = await cachedFn();
+  return deserializeSnapshot(serializedResult) as unknown as T;
 }
 
 /**

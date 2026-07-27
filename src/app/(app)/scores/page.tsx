@@ -79,10 +79,12 @@ export default async function ScoresPage({
   };
 
   const kpiTemplates: any[] = [];
-  for (const chunk of chunkIds(roleIds)) {
-    if (chunk.length > 0) {
-      const snap = await adminDb.collection("KpiTemplate").where("roleId", "in", chunk).get();
-      snap.docs.forEach((d: any) => kpiTemplates.push({ id: d.id, ...d.data() }));
+  if (roleIds.length > 0) {
+    for (const chunk of chunkIds(roleIds)) {
+      if (chunk.length > 0) {
+        const snap = await adminDb.collection("KpiTemplate").where("roleId", "in", chunk).get();
+        snap.docs?.forEach((d: any) => kpiTemplates.push({ id: d.id, ...d.data() }));
+      }
     }
   }
   kpiTemplates.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
@@ -102,8 +104,8 @@ export default async function ScoresPage({
       ]);
       const periodStartMs = periodStart.getTime();
       const monthEndMs = monthEnd.getTime();
-      scoresSnap.docs.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
-      tasksSnap.docs.forEach((d: any) => {
+      scoresSnap.docs?.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
+      tasksSnap.docs?.forEach((d: any) => {
         const t = d.data();
         const raw = t.createdAt;
         const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
@@ -117,8 +119,8 @@ export default async function ScoresPage({
           carryCount: t.carryCount ?? 0,
         });
       });
-      reviewsSnap.docs.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
-      behaviourSnap.docs.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
+      reviewsSnap.docs?.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
+      behaviourSnap.docs?.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
     }
   }
 
@@ -212,7 +214,7 @@ export default async function ScoresPage({
                 <details key={e.id} className="rounded-xl border border-slate-200">
                   <summary className="flex cursor-pointer flex-wrap items-center gap-3 p-3">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
-                      {e.name.split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
+                      {(e.name || "U").split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
                     </div>
                     <div className="min-w-[9rem]">
                       <div className="text-sm font-medium">{e.name}</div>
