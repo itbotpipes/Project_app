@@ -5,6 +5,7 @@ import { computeWeeklyStars } from "@/lib/weeklyStar";
 import { Card, SectionTitle, Badge } from "../_components/ui";
 import Avatar from "../_components/Avatar";
 import { ScoreBars } from "../_components/Charts";
+import { batchFetchByIds, fetchAllRoles, fetchAllDepartments } from "@/lib/cache";
 
 function fmtISO(d: Date) {
   return d.toISOString().slice(0, 10);
@@ -64,26 +65,30 @@ export default async function LeaderboardPage({
   const pm = periodStart.getMonth() + 1;
 
   const employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
-  const empIds = employeesSnap.docs.map((d) => d.id);
+  const empIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.id) : [];
+  const roleIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];
 
-  // Resolve roles and departments for each employee
-  const employees = await Promise.all(
-    employeesSnap.docs.map(async (doc) => {
-      const emp = doc.data() as any;
-      let deptName = "Other";
-      if (emp.roleId) {
-        const roleDoc = await adminDb.collection("Role").doc(emp.roleId).get();
-        if (roleDoc.exists) {
-          const role = roleDoc.data()!;
-          if (role.departmentId) {
-            const deptDoc = await adminDb.collection("Department").doc(role.departmentId).get();
-            if (deptDoc.exists) deptName = deptDoc.data()!.name;
-          }
-        }
-      }
-      return { id: doc.id, ...emp, deptName };
-    })
-  );
+  // Batch fetch roles and departments using cached data
+  const [rolesMap, departmentsMap] = await Promise.all([
+    batchFetchByIds('Role', roleIds, adminDb),
+    fetchAllDepartments(adminDb),
+  ]);
+
+  // Build department name map from roles
+  const deptNameByRoleId = new Map<string, string>();
+  rolesMap.forEach((role: any) => {
+    if (role.departmentId) {
+      const dept = departmentsMap.docs?.find((d: any) => d.id === role.departmentId);
+      if (dept) deptNameByRoleId.set(role.id, dept.data().name);
+    }
+  });
+
+  // Resolve roles and departments for each employee using batched data
+  const employees = employeesSnap.docs ? employeesSnap.docs.map((doc: any) => {
+    const emp = doc.data();
+    const deptName = emp.roleId ? (deptNameByRoleId.get(emp.roleId) ?? "Other") : "Other";
+    return { id: doc.id, ...emp, deptName };
+  }) : [];
 
   // Batch scorecards and tasks for period (max 30 per Firestore "in" query)
   const chunkSize = 30;
@@ -94,30 +99,32 @@ export default async function LeaderboardPage({
   const tasksAll: any[] = [];
   const closedTasksAll: any[] = [];
 
-  await Promise.all(
-    chunks.map(async (chunk) => {
-      const [sc, ta, ca] = await Promise.all([
-        adminDb.collection("MonthlyScorecard").where("employeeId", "in", chunk).where("year", "==", py).where("month", "==", pm).get(),
-        adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
-        adminDb.collection("Task").where("assigneeId", "in", chunk).where("status", "==", "CLOSED").get(),
-      ]);
-      const periodStartMs = periodStart.getTime();
-      const periodEndMs = periodEnd.getTime();
-      sc.docs.forEach((d) => scorecardsAll.push({ ...d.data(), id: d.id }));
-      ta.docs.forEach((d) => {
-        const raw = d.data().createdAt;
-        const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-        if (createdAt.getTime() >= periodStartMs && createdAt.getTime() < periodEndMs)
-          tasksAll.push({ ...d.data(), id: d.id });
-      });
-      ca.docs.forEach((d) => {
-        const raw = d.data().completedAt;
-        const completedAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-        if (completedAt.getTime() >= periodStartMs && completedAt.getTime() < periodEndMs)
-          closedTasksAll.push({ ...d.data(), id: d.id });
-      });
-    })
-  );
+  if (chunks.length > 0) {
+    await Promise.all(
+      chunks.map(async (chunk) => {
+        const [sc, ta, ca] = await Promise.all([
+          adminDb.collection("MonthlyScorecard").where("employeeId", "in", chunk).where("year", "==", py).where("month", "==", pm).get(),
+          adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
+          adminDb.collection("Task").where("assigneeId", "in", chunk).where("status", "==", "CLOSED").get(),
+        ]);
+        const periodStartMs = periodStart.getTime();
+        const periodEndMs = periodEnd.getTime();
+        sc.docs?.forEach((d: any) => scorecardsAll.push({ ...d.data(), id: d.id }));
+        ta.docs?.forEach((d: any) => {
+          const raw = d.data().createdAt;
+          const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+          if (createdAt.getTime() >= periodStartMs && createdAt.getTime() < periodEndMs)
+            tasksAll.push({ ...d.data(), id: d.id });
+        });
+        ca.docs?.forEach((d: any) => {
+          const raw = d.data().completedAt;
+          const completedAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+          if (completedAt.getTime() >= periodStartMs && completedAt.getTime() < periodEndMs)
+            closedTasksAll.push({ ...d.data(), id: d.id });
+        });
+      })
+    );
+  }
 
   const scoreMap = new Map(scorecardsAll.map((s: any) => [s.employeeId, s.total as number]));
 

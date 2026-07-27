@@ -61,7 +61,7 @@ export default async function OrgChartPage({
     };
   }
 
-  const roots = employees.filter((e: any) => !e.reportsToId).map(buildTree);
+  const roots = employees ? employees.filter((e: any) => !e.reportsToId).map(buildTree) : [];
 
   const flatData: FlatOrgData = {
     root: topPerson ? { id: topPerson.id, name: topPerson.name, roleTitle: topPerson.role.title } : null,
@@ -82,7 +82,7 @@ export default async function OrgChartPage({
         <div>
           <h1 className="text-2xl font-semibold">Org Chart</h1>
           <p className="text-sm text-slate-500">
-            {employees.length} people across the company — {view === "flat" ? "by position" : "by reporting chain"}.
+            {employees?.length ?? 0} people across the company — {view === "flat" ? "by position" : "by reporting chain"}.
           </p>
         </div>
         <div className="flex gap-1 rounded-full bg-slate-100 p-0.5 text-xs">
