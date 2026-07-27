@@ -24,10 +24,14 @@ export async function batchFetchByIds<T>(
 ): Promise<Map<string, T>> {
   if (ids.length === 0) return new Map();
   
+  // Filter out any empty/undefined IDs
+  const validIds = ids.filter(id => id && typeof id === 'string');
+  if (validIds.length === 0) return new Map();
+  
   // Firestore 'in' query supports up to 10 items, so we need to batch
   const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += 10) {
-    chunks.push(ids.slice(i, i + 10));
+  for (let i = 0; i < validIds.length; i += 10) {
+    chunks.push(validIds.slice(i, i + 10));
   }
   
   const results = new Map<string, T>();

@@ -224,7 +224,7 @@ export default async function Dashboard() {
     () => adminDb.collection("MonthlyScorecard").orderBy("year", "desc").orderBy("month", "desc").limit(1).get(),
     60 // cache for 1 minute
   );
-  const allPeriodDocs = allPeriodsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
+  const allPeriodDocs = allPeriodsSnap.docs ? allPeriodsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month)) : [];
   const latestPeriod = allPeriodDocs.length === 0 ? null : allPeriodDocs[0].data() as any;
   
   let starBoard: any[] = [];
