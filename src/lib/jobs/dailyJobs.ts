@@ -3,6 +3,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { computeAutoScores } from "@/lib/autoscore";
 import { previousMonthStart } from "@/lib/date";
 import { FieldValue } from "firebase-admin/firestore";
+import { batchFetchByIds } from "@/lib/cache";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -60,13 +61,16 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
   const employees = employeesSnap.docs ? employeesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[] : [];
   const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
 
+  // Batch fetch all KPI templates by role IDs
+  const kpisMap = await batchFetchByIds('KpiTemplate', roleIds, adminDb);
+  
+  // Group KPIs by role
   const kpisByRole = new Map<string, any[]>();
-  await Promise.all(
-    roleIds.map(async (roleId) => {
-      const snap = await adminDb.collection("KpiTemplate").where("roleId", "==", roleId).get();
-      kpisByRole.set(roleId, snap.docs ? snap.docs.map((d) => ({ id: d.id, ...d.data() })) : []);
-    })
-  );
+  kpisMap.forEach((kpi: any) => {
+    const roleId = kpi.roleId;
+    if (!kpisByRole.has(roleId)) kpisByRole.set(roleId, []);
+    kpisByRole.get(roleId)!.push(kpi);
+  });
 
   const empIds = employees.map((e) => e.id);
   const tasksByEmp = new Map<string, any[]>();

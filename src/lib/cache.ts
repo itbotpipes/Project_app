@@ -62,3 +62,46 @@ export const CACHE_TAGS = {
   ROLE: 'role',
   DEPARTMENT: 'department',
 } as const;
+
+/**
+ * Pre-configured cache functions for frequently accessed data
+ */
+export async function fetchAllRoles(adminDb: any) {
+  return cachedFetch(
+    'all-roles',
+    () => adminDb.collection("Role").get(),
+    600 // 10 minutes
+  ) as Promise<any>;
+}
+
+export async function fetchAllDepartments(adminDb: any) {
+  return cachedFetch(
+    'all-departments',
+    () => adminDb.collection("Department").get(),
+    600 // 10 minutes
+  ) as Promise<any>;
+}
+
+export async function fetchAllKpiTemplates(adminDb: any) {
+  return cachedFetch(
+    'all-kpi-templates',
+    () => adminDb.collection("KpiTemplate").get(),
+    600 // 10 minutes
+  ) as Promise<any>;
+}
+
+export async function fetchKpiTemplatesByRole(roleId: string, adminDb: any) {
+  return cachedFetch(
+    `kpi-templates-by-role:${roleId}`,
+    () => adminDb.collection("KpiTemplate").where("roleId", "==", roleId).get(),
+    600 // 10 minutes
+  ) as Promise<any>;
+}
+
+export async function fetchTaskTemplates(adminDb: any) {
+  return cachedFetch(
+    'task-templates',
+    () => adminDb.collection("TaskTemplate").orderBy("createdAt", "desc").get(),
+    600 // 10 minutes
+  ) as Promise<any>;
+}

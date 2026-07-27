@@ -4,6 +4,7 @@ import { TASK_STATUS_LABEL } from "@/lib/constants";
 import { cn } from "@/lib/cn";
 import { Card, SectionTitle } from "../_components/ui";
 import TaskLink from "../_components/TaskLink";
+import { batchFetchByIds } from "@/lib/cache";
 
 const STATUS_TONE: Record<string, string> = {
   NEW: "bg-slate-100 text-slate-600",
@@ -19,37 +20,59 @@ export default async function SubscribedTasksPage() {
   if (!user) return null;
 
   const watchesSnap = await adminDb.collection("TaskWatcher").where("employeeId", "==", user.id).get();
-  watchesSnap.docs.sort((a, b) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0));
+  if (watchesSnap.docs) {
+    watchesSnap.docs.sort((a, b) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0));
+  }
   
-  const watches = await Promise.all(
-    watchesSnap.docs.map(async (doc) => {
-      const w = doc.data() as any;
-      const tDoc = await adminDb.collection("Task").doc(w.taskId).get();
-      if (!tDoc.exists) return null;
-      const t = tDoc.data()!;
-      if (t.deletedAt) return null;
+  // Batch fetch all watched tasks and related data
+  const taskIds = watchesSnap.docs ? watchesSnap.docs.map((d: any) => d.data().taskId).filter(Boolean) as string[] : [];
+  const tasksMap = await batchFetchByIds('Task', taskIds, adminDb);
+  
+  // Filter out deleted tasks and collect related IDs
+  const validTasks = new Map<string, any>();
+  const assigneeIds: string[] = [];
+  const creatorIds: string[] = [];
+  const kpiIds: string[] = [];
+  
+  tasksMap.forEach((task: any) => {
+    if (!task.deletedAt) {
+      validTasks.set(task.id, task);
+      if (task.assigneeId) assigneeIds.push(task.assigneeId);
+      if (task.creatorId) creatorIds.push(task.creatorId);
+      if (task.kpiTemplateId) kpiIds.push(task.kpiTemplateId);
+    }
+  });
+  
+  // Batch fetch related data
+  const [assigneesMap, creatorsMap, kpisMap] = await Promise.all([
+    batchFetchByIds('Employee', assigneeIds, adminDb),
+    batchFetchByIds('Employee', creatorIds, adminDb),
+    batchFetchByIds('KpiTemplate', kpiIds, adminDb),
+  ]);
+  
+  const watches = watchesSnap.docs ? watchesSnap.docs.map((doc: any) => {
+    const w = doc.data();
+    const task = validTasks.get(w.taskId);
+    if (!task) return null;
+    
+    const assignee = task.assigneeId ? (assigneesMap.get(task.assigneeId) as any) : null;
+    const creator = task.creatorId ? (creatorsMap.get(task.creatorId) as any) : null;
+    const kpi = task.kpiTemplateId ? (kpisMap.get(task.kpiTemplateId) as any) : null;
 
-      const [assigneeDoc, creatorDoc, kpiDoc] = await Promise.all([
-        t.assigneeId ? adminDb.collection("Employee").doc(t.assigneeId).get() : Promise.resolve(null),
-        t.creatorId ? adminDb.collection("Employee").doc(t.creatorId).get() : Promise.resolve(null),
-        t.kpiTemplateId ? adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get() : Promise.resolve(null),
-      ]);
+    return {
+      id: doc.id,
+      task: {
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        assignee: { name: assignee?.name ?? "Unknown" },
+        creator: { name: creator?.name ?? "Unknown" },
+        kpiTemplate: kpi ? { kpiName: kpi.kpiName } : null,
+      }
+    };
+  }).filter(Boolean) : [];
 
-      return {
-        id: doc.id,
-        task: {
-          id: tDoc.id,
-          title: t.title,
-          status: t.status,
-          assignee: { name: assigneeDoc?.exists ? assigneeDoc.data()!.name : "Unknown" },
-          creator: { name: creatorDoc?.exists ? creatorDoc.data()!.name : "Unknown" },
-          kpiTemplate: kpiDoc?.exists ? { kpiName: kpiDoc.data()!.kpiName } : null,
-        }
-      };
-    })
-  );
-
-  const activeWatches = watches.filter(Boolean) as any[];
+  const activeWatches = watches as any[];
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

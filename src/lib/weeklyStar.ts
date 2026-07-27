@@ -1,5 +1,6 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { mondayOf } from "@/lib/date";
+import { fetchAllRoles, batchFetchByIds } from "@/lib/cache";
 
 export type WeeklyStarRow = {
   id: string;
@@ -38,15 +39,9 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
   // Only count KPIs that have weightage > 0
   const weightedKpis = kpiTemplatesSnap.docs ? kpiTemplatesSnap.docs.filter((d) => (d.data().weightage ?? 0) > 0) : [];
 
-  // Resolve roles for each employee
+  // Resolve roles for each employee using batched cached fetch
   const roleIds = [...new Set(employeesSnap.docs ? employeesSnap.docs.map((d) => d.data().roleId).filter(Boolean) : [])];
-  const roleMap = new Map<string, any>();
-  await Promise.all(
-    roleIds.map(async (roleId) => {
-      const roleDoc = await adminDb.collection("Role").doc(roleId).get();
-      if (roleDoc.exists) roleMap.set(roleId, roleDoc.data());
-    })
-  );
+  const rolesMap = await batchFetchByIds('Role', roleIds, adminDb);
 
   const kpiCountByRole = new Map<string, number>();
   for (const k of weightedKpis) {
@@ -64,7 +59,7 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
 
   const rows: WeeklyStarRow[] = employeesSnap.docs ? employeesSnap.docs.map((e) => {
     const emp = e.data();
-    const role = roleMap.get(emp.roleId);
+    const role = rolesMap.get(emp.roleId) as any;
     const tasks = byEmp.get(e.id) ?? [];
     const closed = tasks.length;
     const onTime = tasks.filter((t) => {

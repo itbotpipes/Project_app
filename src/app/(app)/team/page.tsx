@@ -5,6 +5,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel } from "@/lib/scores";
 import { Card, SectionTitle, Badge } from "../_components/ui";
+import { batchFetchByIds } from "@/lib/cache";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -19,35 +20,57 @@ export default async function TeamPage() {
 
   const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
   
-  const reportsData = await Promise.all(
-    reportsSnap.docs.map(async (doc) => {
-      const emp = doc.data() as any;
-      const [roleDoc, scorecardsSnap, openTasksSnap] = await Promise.all([
-        emp.roleId ? adminDb.collection("Role").doc(emp.roleId).get() : Promise.resolve(null),
-        adminDb.collection("MonthlyScorecard").where("employeeId", "==", doc.id).get(),
-        adminDb.collection("Task").where("assigneeId", "==", doc.id).where("status", "!=", "CLOSED").get(),
-      ]);
-      
-      const role = roleDoc?.exists ? roleDoc.data()! : { title: "Unknown" };
-      const latestScorecard = scorecardsSnap.empty
-        ? null
-        : scorecardsSnap.docs
-            .sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month))[0]
-            .data();
-      
-      // Filter out deleted tasks
-      const activeOpenTasks = openTasksSnap.docs.filter(t => !t.data().deletedAt).map(t => ({ dueAt: toDate(t.data().dueAt) }));
-      
-      return {
-        id: doc.id,
-        name: emp.name,
-        role,
-        scorecards: latestScorecard ? [latestScorecard] : [],
-        openTasks: activeOpenTasks,
-        _count: { assignedTasks: activeOpenTasks.length }
-      };
-    })
-  );
+  // Batch fetch all related data
+  const roleIds = reportsSnap.docs ? reportsSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];
+  const employeeIds = reportsSnap.docs ? reportsSnap.docs.map((d: any) => d.id) : [];
+  
+  const [rolesMap, scorecardsSnap, tasksSnap] = await Promise.all([
+    batchFetchByIds('Role', roleIds, adminDb),
+    employeeIds.length > 0 ? adminDb.collection("MonthlyScorecard").where("employeeId", "in", employeeIds).get() : Promise.resolve({ docs: [] } as any),
+    employeeIds.length > 0 ? adminDb.collection("Task").where("assigneeId", "in", employeeIds).where("status", "!=", "CLOSED").get() : Promise.resolve({ docs: [] } as any),
+  ]);
+  
+  // Group scorecards by employee
+  const scorecardsByEmployee = new Map<string, any[]>();
+  scorecardsSnap.docs?.forEach((doc: any) => {
+    const empId = doc.data().employeeId;
+    if (!scorecardsByEmployee.has(empId)) scorecardsByEmployee.set(empId, []);
+    scorecardsByEmployee.get(empId)!.push(doc.data());
+  });
+  
+  // Get latest scorecard for each employee
+  const latestScorecards = new Map<string, any>();
+  scorecardsByEmployee.forEach((cards, empId) => {
+    const sorted = cards.sort((a, b) => (b.year - a.year) || (b.month - a.month));
+    if (sorted.length > 0) latestScorecards.set(empId, sorted[0]);
+  });
+  
+  // Group tasks by employee
+  const tasksByEmployee = new Map<string, any[]>();
+  tasksSnap.docs?.forEach((doc: any) => {
+    const empId = doc.data().assigneeId;
+    if (!tasksByEmployee.has(empId)) tasksByEmployee.set(empId, []);
+    tasksByEmployee.get(empId)!.push(doc.data());
+  });
+  
+  const reportsData = reportsSnap.docs ? reportsSnap.docs.map((doc: any) => {
+    const emp = doc.data();
+    const role = emp.roleId ? (rolesMap.get(emp.roleId) as any) : { title: "Unknown" };
+    const latestScorecard = latestScorecards.get(doc.id) || null;
+    const employeeTasks = tasksByEmployee.get(doc.id) || [];
+    
+    // Filter out deleted tasks
+    const activeOpenTasks = employeeTasks.filter((t: any) => !t.deletedAt).map((t: any) => ({ dueAt: toDate(t.dueAt) }));
+    
+    return {
+      id: doc.id,
+      name: emp.name,
+      role,
+      scorecards: latestScorecard ? [latestScorecard] : [],
+      openTasks: activeOpenTasks,
+      _count: { assignedTasks: activeOpenTasks.length }
+    };
+  }) : [];
   reportsData.sort((a, b) => a.name.localeCompare(b.name));
 
   // Workload radar — open + overdue tasks per report
