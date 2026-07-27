@@ -2,6 +2,7 @@ import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { Card, SectionTitle } from "../_components/ui";
 import RestoreButton from "./RestoreButton";
+import { batchFetchByIds } from "@/lib/cache";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -38,22 +39,28 @@ export default async function DeletedTasksPage() {
     tasksSnap = { docs: combined };
   }
 
-  const tasks = await Promise.all(
-    tasksSnap.docs.map(async (doc) => {
-      const t = doc.data() as any;
-      const [assigneeDoc, creatorDoc] = await Promise.all([
-        t.assigneeId ? adminDb.collection("Employee").doc(t.assigneeId).get() : Promise.resolve(null),
-        t.creatorId ? adminDb.collection("Employee").doc(t.creatorId).get() : Promise.resolve(null),
-      ]);
-      return {
-        id: doc.id,
-        title: t.title,
-        deletedAt: toDate(t.deletedAt),
-        assignee: { name: assigneeDoc?.exists ? assigneeDoc.data()!.name : "Unknown" },
-        creator: { name: creatorDoc?.exists ? creatorDoc.data()!.name : "Unknown" },
-      };
-    })
-  );
+  // Batch fetch assignees and creators
+  const assigneeIds = tasksSnap.docs ? tasksSnap.docs.map((d: any) => d.data().assigneeId).filter(Boolean) as string[] : [];
+  const creatorIds = tasksSnap.docs ? tasksSnap.docs.map((d: any) => d.data().creatorId).filter(Boolean) as string[] : [];
+  
+  const [assigneesMap, creatorsMap] = await Promise.all([
+    batchFetchByIds('Employee', assigneeIds, adminDb),
+    batchFetchByIds('Employee', creatorIds, adminDb),
+  ]);
+
+  const tasks = tasksSnap.docs ? tasksSnap.docs.map((doc) => {
+    const t = doc.data() as any;
+    const assignee = assigneeIds.includes(t.assigneeId) ? (assigneesMap.get(t.assigneeId) as any) : null;
+    const creator = creatorIds.includes(t.creatorId) ? (creatorsMap.get(t.creatorId) as any) : null;
+    
+    return {
+      id: doc.id,
+      title: t.title,
+      deletedAt: toDate(t.deletedAt),
+      assignee: { name: assignee?.name ?? "Unknown" },
+      creator: { name: creator?.name ?? "Unknown" },
+    };
+  }) : [];
 
   return (
     <div className="mx-auto max-w-4xl space-y-4">

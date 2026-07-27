@@ -3,18 +3,23 @@ import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { Card } from "../_components/ui";
 import CreateGroupDialog from "./CreateGroupDialog";
+import { batchFetchByIds, cachedFetch, fetchAllDepartments } from "@/lib/cache";
 
 export default async function GroupsPage() {
   const user = await getCurrentUser();
   if (!user) return null;
 
-  const [groupsSnap, departmentsSnap, peopleSnap] = await Promise.all([
+  const [groupsSnap, departmentsMap, peopleSnap] = await Promise.all([
     adminDb.collection("Group").get(),
-    adminDb.collection("Department").get(),
-    adminDb.collection("Employee").where("active", "==", true).get(),
+    fetchAllDepartments(adminDb),
+    cachedFetch(
+      'active-employees',
+      () => adminDb.collection("Employee").where("active", "==", true).get(),
+      300 // cache for 5 minutes
+    ),
   ]);
 
-  const departments = departmentsSnap.docs
+  const departments = departmentsMap.docs ? departmentsMap.docs
     .map((d) => {
       const data = d.data();
       const serialized: any = { id: d.id };
@@ -27,57 +32,83 @@ export default async function GroupsPage() {
       }
       return serialized;
     })
-    .sort((a: any, b: any) => a.name.localeCompare(b.name)) as any[];
+    .sort((a: any, b: any) => a.name.localeCompare(b.name)) : [];
   const people = peopleSnap.docs
     .map((d) => ({ id: d.id, name: d.data().name }))
     .sort((a, b) => a.name.localeCompare(b.name));
 
-  // Sort groups alphabetically in JS
-  const groups = (await Promise.all(
-    groupsSnap.docs.map(async (doc) => {
-      const g = doc.data() as any;
-      // Serialize Group data timestamps
-      const serializedGroup: any = {};
-      for (const [key, value] of Object.entries(g)) {
-        if (value && typeof value === 'object' && 'toDate' in value) {
-          serializedGroup[key] = (value as any).toDate();
-        } else {
-          serializedGroup[key] = value;
-        }
+  // Batch fetch all group members and departments
+  const groupIds = groupsSnap.docs ? groupsSnap.docs.map((d: any) => d.id) : [];
+  const deptIds = groupsSnap.docs ? groupsSnap.docs.map((d: any) => d.data().departmentId).filter(Boolean) as string[] : [];
+  
+  const [membersSnap, departmentsById] = await Promise.all([
+    groupIds.length > 0 ? adminDb.collection("GroupMember").where("groupId", "in", groupIds).get() : Promise.resolve({ docs: [] } as any),
+    batchFetchByIds('Department', deptIds, adminDb),
+  ]);
+  
+  // Group members by group ID
+  const membersByGroup = new Map<string, any[]>();
+  membersSnap.docs?.forEach((m: any) => {
+    const groupId = m.data().groupId;
+    if (!membersByGroup.has(groupId)) membersByGroup.set(groupId, []);
+    membersByGroup.get(groupId)!.push({ employeeId: m.data().employeeId });
+  });
+  
+  // Batch fetch task counts for all groups
+  const taskCountsByGroup = new Map<string, { open: number; done: number }>();
+  if (groupIds.length > 0) {
+    const [openTasksSnap, doneTasksSnap] = await Promise.all([
+      adminDb.collection("Task").where("groupId", "in", groupIds).where("deletedAt", "==", null).where("status", "!=", "CLOSED").get(),
+      adminDb.collection("Task").where("groupId", "in", groupIds).where("deletedAt", "==", null).where("status", "==", "CLOSED").get(),
+    ]);
+    
+    openTasksSnap.docs?.forEach((t: any) => {
+      const groupId = t.data().groupId;
+      if (groupId) {
+        const cur = taskCountsByGroup.get(groupId) ?? { open: 0, done: 0 };
+        cur.open++;
+        taskCountsByGroup.set(groupId, cur);
       }
-      const [membersSnap, openTasksSnap, doneTasksSnap, deptDoc] = await Promise.all([
-        adminDb.collection("GroupMember").where("groupId", "==", doc.id).get(),
-        adminDb.collection("Task").where("groupId", "==", doc.id).where("deletedAt", "==", null).where("status", "!=", "CLOSED").get(),
-        adminDb.collection("Task").where("groupId", "==", doc.id).where("deletedAt", "==", null).where("status", "==", "CLOSED").get(),
-        serializedGroup.departmentId ? adminDb.collection("Department").doc(serializedGroup.departmentId).get() : Promise.resolve(null),
-      ]);
-      // Serialize department data if exists
-      let department = null;
-      if (deptDoc?.exists) {
-        const deptData = deptDoc.data();
-        const serializedDept: any = {};
-        for (const [key, value] of Object.entries(deptData || {})) {
-          if (value && typeof value === 'object' && 'toDate' in value) {
-            serializedDept[key] = (value as any).toDate();
-          } else {
-            serializedDept[key] = value;
-          }
-        }
-        department = { name: serializedDept.name };
+    });
+    
+    doneTasksSnap.docs?.forEach((t: any) => {
+      const groupId = t.data().groupId;
+      if (groupId) {
+        const cur = taskCountsByGroup.get(groupId) ?? { open: 0, done: 0 };
+        cur.done++;
+        taskCountsByGroup.set(groupId, cur);
       }
+    });
+  }
 
-      return {
-        id: doc.id,
-        name: serializedGroup.name,
-        description: serializedGroup.description ?? null,
-        departmentId: serializedGroup.departmentId,
-        members: membersSnap.docs.map((m) => ({ employeeId: m.data().employeeId })),
-        openCount: openTasksSnap.size,
-        doneCount: doneTasksSnap.size,
-        department,
-      };
-    })
-  )).sort((a, b) => a.name.localeCompare(b.name));
+  // Sort groups alphabetically in JS
+  const groups = groupsSnap.docs ? groupsSnap.docs.map((doc) => {
+    const g = doc.data() as any;
+    // Serialize Group data timestamps
+    const serializedGroup: any = {};
+    for (const [key, value] of Object.entries(g)) {
+      if (value && typeof value === 'object' && 'toDate' in value) {
+        serializedGroup[key] = (value as any).toDate();
+      } else {
+        serializedGroup[key] = value;
+      }
+    }
+    
+    const department = serializedGroup.departmentId ? (departmentsById.get(serializedGroup.departmentId) as any) : null;
+    const counts = taskCountsByGroup.get(doc.id) ?? { open: 0, done: 0 };
+    const members = membersByGroup.get(doc.id) ?? [];
+
+    return {
+      id: doc.id,
+      name: serializedGroup.name,
+      description: serializedGroup.description ?? null,
+      departmentId: serializedGroup.departmentId,
+      members,
+      openCount: counts.open,
+      doneCount: counts.done,
+      department: department ? { name: department.name } : null,
+    };
+  }).sort((a, b) => a.name.localeCompare(b.name)) : [];
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">

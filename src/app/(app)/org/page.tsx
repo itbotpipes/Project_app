@@ -5,6 +5,7 @@ import { cn } from "@/lib/cn";
 import { Card } from "../_components/ui";
 import OrgNode, { type OrgPerson } from "./OrgNode";
 import FlatOrgChart, { type FlatOrgData } from "./FlatOrgChart";
+import { batchFetchByIds, fetchAllDepartments } from "@/lib/cache";
 
 export default async function OrgChartPage({
   searchParams,
@@ -16,29 +17,24 @@ export default async function OrgChartPage({
   const sp = await searchParams;
   const view = sp.view === "chain" ? "chain" : "flat";
 
-  const [employeesSnap, departmentsSnap] = await Promise.all([
+  const [employeesSnap, departmentsMap] = await Promise.all([
     adminDb.collection("Employee").where("active", "==", true).get(),
-    adminDb.collection("Department").orderBy("name", "asc").get(),
+    fetchAllDepartments(adminDb),
   ]);
 
-  // Resolve role for each employee
-  const employees = employeesSnap.docs ? await Promise.all(
-    employeesSnap.docs.map(async (doc) => {
-      const emp = doc.data() as any;
-      let roleTitle = "Unknown";
-      let roleDepartmentId: string | null = null;
-      if (emp.roleId) {
-        const roleDoc = await adminDb.collection("Role").doc(emp.roleId).get();
-        if (roleDoc.exists) {
-          roleTitle = roleDoc.data()!.title;
-          roleDepartmentId = roleDoc.data()!.departmentId ?? null;
-        }
-      }
-      return { id: doc.id, ...emp, role: { title: roleTitle, departmentId: roleDepartmentId } };
-    })
-  ) : [];
+  // Batch fetch roles for all employees
+  const roleIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];
+  const rolesMap = await batchFetchByIds('Role', roleIds, adminDb);
+
+  // Resolve role for each employee using batched data
+  const employees = employeesSnap.docs ? employeesSnap.docs.map((doc) => {
+    const emp = doc.data() as any;
+    const role = emp.roleId ? (rolesMap.get(emp.roleId) as any) : null;
+    return { id: doc.id, ...emp, role: { title: role?.title ?? "Unknown", departmentId: role?.departmentId ?? null } };
+  }) : [];
+  
   employees.sort((a: any, b: any) => a.name.localeCompare(b.name));
-  const departments = departmentsSnap.docs ? departmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[] : [];
+  const departments = departmentsMap.docs ? departmentsMap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as any[] : [];
 
   const topPerson = employees.find((e: any) => !e.reportsToId);
 

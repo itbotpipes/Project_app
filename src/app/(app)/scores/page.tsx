@@ -6,6 +6,7 @@ import { monthStartOf, previousMonthStart } from "@/lib/date";
 import { computeAutoScores } from "@/lib/autoscore";
 import { Card, SectionTitle, Badge } from "../_components/ui";
 import KpiScoreEditor from "./KpiScoreEditor";
+import { batchFetchByIds, cachedFetch, fetchAllDepartments } from "@/lib/cache";
 
 export default async function ScoresPage({
   searchParams,
@@ -28,34 +29,48 @@ export default async function ScoresPage({
 
   let employeesSnap;
   if (companyWide) {
-    employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+    employeesSnap = await cachedFetch(
+      'active-employees',
+      () => adminDb.collection("Employee").where("active", "==", true).get(),
+      300 // cache for 5 minutes
+    );
   } else {
     employeesSnap = await adminDb.collection("Employee").where("active", "==", true).where("reportsToId", "==", user.id).get();
   }
   
-  const employees = employeesSnap.docs ? await Promise.all(
-    employeesSnap.docs.map(async (doc) => {
-      const emp = doc.data() as any;
-      let roleData = { title: "Unknown", department: null as any };
-      if (emp.roleId) {
-        const roleDoc = await adminDb.collection("Role").doc(emp.roleId).get();
-        if (roleDoc.exists) {
-          const role = roleDoc.data()!;
-          roleData.title = role.title;
-          if (role.departmentId) {
-            const deptDoc = await adminDb.collection("Department").doc(role.departmentId).get();
-            if (deptDoc.exists) roleData.department = { name: deptDoc.data()!.name };
-          }
+  const employees = employeesSnap.docs ? employeesSnap.docs.map((doc) => {
+    const emp = doc.data() as any;
+    return { id: doc.id, ...emp, role: null };
+  }) : [];
+  
+  // Batch fetch roles and departments
+  const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
+  const [rolesMap, departmentsMap] = await Promise.all([
+    batchFetchByIds('Role', roleIds, adminDb),
+    fetchAllDepartments(adminDb),
+  ]);
+  
+  // Build department name map
+  const deptNameById = new Map<string, string>();
+  departmentsMap.docs?.forEach((d: any) => {
+    deptNameById.set(d.id, d.data().name);
+  });
+  
+  // Attach role and department data to employees
+  employees.forEach((e: any) => {
+    const role = e.roleId ? (rolesMap.get(e.roleId) as any) : null;
+    e.role = role 
+      ? { 
+          title: role.title, 
+          level: role.level,
+          department: role.departmentId ? { name: deptNameById.get(role.departmentId) ?? "Other" } : null 
         }
-      }
-      return { id: doc.id, ...emp, role: roleData };
-    })
-  ) : [];
-  employees.sort((a, b) => (a.role?.level ?? 99) - (b.role?.level ?? 99) || a.name.localeCompare(b.name));
+      : { title: "Unknown", department: null };
+  });
+  
+  employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
   
   const empIds = employees.map((e) => e.id);
-  const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
-
   // Batch query to handle "in" clauses (max 30 elements)
   const chunkIds = (ids: string[]) => {
     const chunks = [];

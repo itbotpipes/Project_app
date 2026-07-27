@@ -4,6 +4,7 @@ import { mondayOf } from "@/lib/date";
 import { computeWeeklyInsights } from "@/lib/insights";
 import { Card, SectionTitle } from "../_components/ui";
 import Chat from "./Chat";
+import { fetchKpiTemplatesByRole, batchFetchByIds } from "@/lib/cache";
 
 export default async function InsightsPage() {
   const user = await getCurrentUser();
@@ -11,32 +12,30 @@ export default async function InsightsPage() {
 
   const weekStart = mondayOf();
   const weekStartMs = weekStart.getTime();
-  const [allTasksSnap, kpisSnap] = await Promise.all([
+  const [allTasksSnap, kpiTemplatesSnap] = await Promise.all([
     adminDb.collection("Task").where("assigneeId", "==", user.id).get(),
-    adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
+    fetchKpiTemplatesByRole(user.roleId, adminDb),
   ]);
 
   // Filter to this week in JS — no composite index needed
-  const tasksSnap = { docs: allTasksSnap.docs.filter((d) => {
+  const tasksSnap = { docs: allTasksSnap.docs ? allTasksSnap.docs.filter((d) => {
     const raw = d.data().createdAt;
     const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
     return createdAt.getTime() >= weekStartMs;
-  }) };
+  }) : [] };
 
-  const tasks = await Promise.all(
-    tasksSnap.docs.map(async (doc) => {
-      const t = doc.data() as any;
-      let kpiName: string | null = null;
-      if (t.kpiTemplateId) {
-        const kpiDoc = await adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get();
-        if (kpiDoc.exists) kpiName = kpiDoc.data()!.kpiName;
-      }
-      const createdAt = t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt);
-      const completedAt = t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null;
-      return { status: t.status, createdAt, completedAt, carryCount: t.carryCount ?? 0, kpiName };
-    })
-  );
-  const buckets = kpisSnap.size;
+  // Batch fetch KPI templates for tasks
+  const kpiIds = tasksSnap.docs ? tasksSnap.docs.map((d: any) => d.data().kpiTemplateId).filter(Boolean) as string[] : [];
+  const kpisMap = await batchFetchByIds('KpiTemplate', kpiIds, adminDb);
+
+  const tasks = tasksSnap.docs ? tasksSnap.docs.map((doc) => {
+    const t = doc.data() as any;
+    const kpi = kpiIds.includes(t.kpiTemplateId) ? (kpisMap.get(t.kpiTemplateId) as any) : null;
+    const createdAt = t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt);
+    const completedAt = t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null;
+    return { status: t.status, createdAt, completedAt, carryCount: t.carryCount ?? 0, kpiName: kpi?.kpiName ?? null };
+  }) : [];
+  const buckets = kpiTemplatesSnap.docs ? kpiTemplatesSnap.docs.length : 0;
 
   const insights = computeWeeklyInsights(
     tasks.map((t) => ({

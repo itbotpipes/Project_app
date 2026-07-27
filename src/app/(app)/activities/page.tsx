@@ -2,6 +2,7 @@ import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { relativeTime } from "@/lib/date";
 import { Card, SectionTitle } from "../_components/ui";
+import { batchFetchByIds } from "@/lib/cache";
 
 const ACTION_ICON: Record<string, string> = {
   "task.create": "🆕",
@@ -40,24 +41,17 @@ export default async function ActivitiesPage() {
   }
   logsSnap.docs.sort((a: any, b: any) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0));
   logsSnap.docs.splice(100);
-  const actorCache = new Map<string, string>();
-  const logs = await Promise.all(
-    logsSnap.docs.map(async (doc) => {
-      const d = doc.data() as any;
-      let actorName = "System";
-      if (d.actorId) {
-        if (actorCache.has(d.actorId)) {
-          actorName = actorCache.get(d.actorId)!;
-        } else {
-          const emp = await adminDb.collection("Employee").doc(d.actorId).get();
-          actorName = emp.exists ? emp.data()!.name : "Unknown";
-          actorCache.set(d.actorId, actorName);
-        }
-      }
-      const ts = d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt);
-      return { id: doc.id, action: d.action, detail: d.detail, actor: d.actorId ? { name: actorName } : null, createdAt: ts };
-    })
-  );
+  
+  // Batch fetch all actor names
+  const actorIds = logsSnap.docs ? logsSnap.docs.map((d: any) => d.data().actorId).filter(Boolean) as string[] : [];
+  const actorsMap = await batchFetchByIds('Employee', actorIds, adminDb);
+  
+  const logs = logsSnap.docs ? logsSnap.docs.map((doc) => {
+    const d = doc.data() as any;
+    const actor = d.actorId ? (actorsMap.get(d.actorId) as any) : null;
+    const ts = d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt);
+    return { id: doc.id, action: d.action, detail: d.detail, actor: actor ? { name: actor.name } : null, createdAt: ts };
+  }) : [];
 
   return (
     <div className="mx-auto max-w-3xl space-y-4">

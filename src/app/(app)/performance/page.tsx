@@ -5,6 +5,7 @@ import { loadEmployeePerformance } from "@/lib/employeePerformance";
 import { Card, StatCard, SectionTitle, Badge } from "../_components/ui";
 import { DualTrendLine, Donut, Legend, ScoreBars, IncrementBar } from "../_components/Charts";
 import BucketFill from "../_components/BucketFill";
+import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
 export default async function PerformancePage() {
   const user = await getCurrentUser();
@@ -37,25 +38,38 @@ export default async function PerformancePage() {
   let reports: any[] = [];
   if (manager) {
     const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
-    reports = await Promise.all(
-      reportsSnap.docs.map(async (doc) => {
-        const emp = doc.data() as any;
-        let roleData = null;
-        let latestScorecard = null;
-        const [roleDoc, scorecardsSnap] = await Promise.all([
-          emp.roleId ? adminDb.collection("Role").doc(emp.roleId).get() : Promise.resolve(null),
-          adminDb.collection("MonthlyScorecard").where("employeeId", "==", doc.id).get(),
-        ]);
-        if (roleDoc?.exists) roleData = roleDoc.data();
-        if (!scorecardsSnap.empty) {
-          // Sort in JS and get the latest one
-          const sorted = scorecardsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
-          latestScorecard = sorted[0].data();
-        }
-        return { id: doc.id, name: emp.name, role: roleData, scorecards: latestScorecard ? [latestScorecard] : [] };
-      })
-    );
-    reports.sort((a, b) => a.name.localeCompare(b.name));
+    
+    // Batch fetch roles and scorecards for all reports
+    const reportIds = reportsSnap.docs ? reportsSnap.docs.map((d: any) => d.id) : [];
+    const roleIds = reportsSnap.docs ? reportsSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];
+    
+    const [rolesMap, scorecardsSnap] = await Promise.all([
+      batchFetchByIds('Role', roleIds, adminDb),
+      reportIds.length > 0 ? adminDb.collection("MonthlyScorecard").where("employeeId", "in", reportIds).get() : Promise.resolve({ docs: [] } as any),
+    ]);
+    
+    // Group scorecards by employee
+    const scorecardsByEmployee = new Map<string, any[]>();
+    scorecardsSnap.docs?.forEach((doc: any) => {
+      const empId = doc.data().employeeId;
+      if (!scorecardsByEmployee.has(empId)) scorecardsByEmployee.set(empId, []);
+      scorecardsByEmployee.get(empId)!.push(doc.data());
+    });
+    
+    // Get latest scorecard for each employee
+    const latestScorecards = new Map<string, any>();
+    scorecardsByEmployee.forEach((cards, empId) => {
+      const sorted = cards.sort((a: any, b: any) => (b.year - a.year) || (b.month - a.month));
+      if (sorted.length > 0) latestScorecards.set(empId, sorted[0]);
+    });
+    
+    reports = reportsSnap.docs ? reportsSnap.docs.map((doc) => {
+      const emp = doc.data() as any;
+      const roleData = emp.roleId ? (rolesMap.get(emp.roleId) as any) : null;
+      const latestScorecard = latestScorecards.get(doc.id) || null;
+      return { id: doc.id, name: emp.name, role: roleData, scorecards: latestScorecard ? [latestScorecard] : [] };
+    }) : [];
+    reports.sort((a: any, b: any) => a.name.localeCompare(b.name));
   }
   const teamBars = reports
     .map((r) => ({ name: r.name, score: Math.round(r.scorecards[0]?.total ?? 0) }))

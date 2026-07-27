@@ -7,6 +7,7 @@ import { Card, SectionTitle, Badge } from "../_components/ui";
 import NewTaskDialog from "../board/NewTaskDialog";
 import { loadTemplateOptions } from "@/lib/templates";
 import TaskLink from "../_components/TaskLink";
+import { batchFetchByIds, cachedFetch, fetchKpiTemplatesByRole } from "@/lib/cache";
 
 const STATUS_TONE: Record<string, string> = {
   NEW: "bg-slate-100 text-slate-600",
@@ -35,42 +36,51 @@ export default async function DelegatedTasksPage() {
       .where("creatorId", "==", user.id)
       .where("deletedAt", "==", null)
       .get(),
-    adminDb.collection("Employee").where("active", "==", true).get(),
-    adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
+    cachedFetch(
+      'active-employees',
+      () => adminDb.collection("Employee").where("active", "==", true).get(),
+      300 // cache for 5 minutes
+    ),
+    fetchKpiTemplatesByRole(user.roleId, adminDb),
   ]);
 
   // Filter out self-assigned
-  const delegatedDocs = delegatedSnap.docs.filter((d) => d.data().assigneeId !== user.id);
+  const delegatedDocs = delegatedSnap.docs ? delegatedSnap.docs.filter((d) => d.data().assigneeId !== user.id) : [];
 
-  // Fetch assignee and kpi info for each task
-  const delegated = await Promise.all(
-    delegatedDocs.map(async (doc) => {
-      const t = doc.data() as any;
-      const [assigneeDoc, kpiDoc] = await Promise.all([
-        t.assigneeId ? adminDb.collection("Employee").doc(t.assigneeId).get() : Promise.resolve(null),
-        t.kpiTemplateId ? adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get() : Promise.resolve(null),
-      ]);
-      return {
-        id: doc.id,
-        title: t.title,
-        status: t.status,
-        urgent: t.urgent,
-        important: t.important,
-        assigneeId: t.assigneeId,
-        dueAt: toDate(t.dueAt),
-        kpiTemplate: kpiDoc?.exists ? { kpiName: kpiDoc.data()!.kpiName } : null,
-        assignee: { id: t.assigneeId, name: assigneeDoc?.exists ? assigneeDoc.data()!.name : "Unknown" },
-      };
-    })
-  );
+  // Batch fetch assignees and KPI templates
+  const assigneeIds = delegatedDocs.map((d: any) => d.data().assigneeId).filter(Boolean) as string[];
+  const kpiIds = delegatedDocs.map((d: any) => d.data().kpiTemplateId).filter(Boolean) as string[];
+  
+  const [assigneesMap, kpisMap] = await Promise.all([
+    batchFetchByIds('Employee', assigneeIds, adminDb),
+    batchFetchByIds('KpiTemplate', kpiIds, adminDb),
+  ]);
 
-  const assignable = assignableSnap.docs
-    .map((d) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
-    .filter((e) => e.id !== user.id)
-    .sort((a, b) => a.name.localeCompare(b.name));
-  const kpiOptions = kpiOptionsSnap.docs
-    .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }));
+  const delegated = delegatedDocs.map((doc) => {
+    const t = doc.data() as any;
+    const assignee = assigneeIds.includes(t.assigneeId) ? (assigneesMap.get(t.assigneeId) as any) : null;
+    const kpi = kpiIds.includes(t.kpiTemplateId) ? (kpisMap.get(t.kpiTemplateId) as any) : null;
+    
+    return {
+      id: doc.id,
+      title: t.title,
+      status: t.status,
+      urgent: t.urgent,
+      important: t.important,
+      assigneeId: t.assigneeId,
+      dueAt: toDate(t.dueAt),
+      kpiTemplate: kpi ? { kpiName: kpi.kpiName } : null,
+      assignee: { id: t.assigneeId, name: assignee?.name ?? "Unknown" },
+    };
+  });
+
+  const assignable = assignableSnap.docs ? assignableSnap.docs
+    .map((d: any) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
+    .filter((e: any) => e.id !== user.id)
+    .sort((a: any, b: any) => a.name.localeCompare(b.name)) : [];
+  const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
+    .sort((a: any, b: any) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
+    .map((d: any) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName })) : [];
   const templates = await loadTemplateOptions();
 
   const open = delegated.filter((t) => t.status !== "CLOSED");
