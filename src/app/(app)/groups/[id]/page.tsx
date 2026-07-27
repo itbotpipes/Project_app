@@ -11,6 +11,7 @@ import { loadTemplateOptions } from "@/lib/templates";
 import GroupMembers from "./GroupMembers";
 import ExchangeControl from "./ExchangeControl";
 import TaskLink from "../../_components/TaskLink";
+import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
 const STATUS_TONE: Record<string, string> = {
   NEW: "bg-slate-100 text-slate-600",
@@ -49,50 +50,68 @@ export default async function GroupDetailPage({
     adminDb.collection("GroupMember").where("groupId", "==", id).get(),
     adminDb.collection("Task").where("groupId", "==", id).where("deletedAt", "==", null).get(),
     adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
-    adminDb.collection("Employee").where("active", "==", true).get(),
+    cachedFetch(
+      'active-employees',
+      () => adminDb.collection("Employee").where("active", "==", true).get(),
+      300 // cache for 5 minutes
+    ),
   ]);
 
-  // Resolve member employees
-  const memberEmployees = await Promise.all(
-    membersSnap.docs.map(async (m) => {
-      const md = m.data() as any;
-      const empDoc = await adminDb.collection("Employee").doc(md.employeeId).get();
-      const emp = empDoc.exists ? empDoc.data() : null;
-      return { id: md.employeeId, name: emp?.name ?? "Unknown", roleId: emp?.roleId ?? null, role: md.role, memberId: m.id };
-    })
-  );
+  // Resolve member employees - batch fetch
+  const memberEmployeeIds = membersSnap.docs.map(m => m.data().employeeId).filter(Boolean) as string[];
+  const membersMap = await batchFetchByIds('Employee', memberEmployeeIds, adminDb);
+  
+  const memberEmployees = membersSnap.docs.map((m) => {
+    const md = m.data() as any;
+    const emp = membersMap.get(md.employeeId) as any;
+    return { id: md.employeeId, name: emp?.name ?? "Unknown", roleId: emp?.roleId ?? null, role: md.role, memberId: m.id };
+  });
 
-  const memberIds = new Set(memberEmployees.map((m) => m.id));
-  const isMember = memberIds.has(user.id);
+  const memberIdsSet = new Set(memberEmployees.map((m) => m.id));
+  const isMember = memberIdsSet.has(user.id);
   if (!isMember && !isManagerLike(user.systemRole)) notFound();
 
   const canManage = group.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO" ||
     memberEmployees.some((m) => m.id === user.id && m.role === "ADMIN");
 
-  // Resolve task details
-  const tasks = await Promise.all(
-    tasksSnap.docs.map(async (doc) => {
-      const t = doc.data() as any;
-      const [assigneeDoc, kpiDoc, checkSnap] = await Promise.all([
-        t.assigneeId ? adminDb.collection("Employee").doc(t.assigneeId).get() : Promise.resolve(null),
-        t.kpiTemplateId ? adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get() : Promise.resolve(null),
-        adminDb.collection("ChecklistItem").where("taskId", "==", doc.id).get(),
-      ]);
-      const assignee = assigneeDoc?.exists ? { id: t.assigneeId, name: assigneeDoc.data()!.name } : { id: t.assigneeId, name: "Unknown" };
-      return {
-        id: doc.id,
-        title: t.title,
-        status: t.status,
-        urgent: t.urgent,
-        important: t.important,
-        assigneeId: t.assigneeId,
-        dueAt: toDate(t.dueAt),
-        kpiTemplate: kpiDoc?.exists ? { kpiName: kpiDoc.data()!.kpiName } : null,
-        checklistItems: checkSnap.docs.map((c) => ({ done: c.data().done })),
-        assignee,
-      };
-    })
-  );
+  // Resolve task details - batch fetch
+  const taskIds = tasksSnap.docs.map(d => d.id);
+  const assigneeIds = tasksSnap.docs.map(d => d.data().assigneeId).filter(Boolean) as string[];
+  const kpiIds = tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[];
+  
+  const [assigneesMap, kpisMap, checklistsSnap] = await Promise.all([
+    batchFetchByIds('Employee', assigneeIds, adminDb),
+    batchFetchByIds('KpiTemplate', kpiIds, adminDb),
+    adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get(),
+  ]);
+  
+  // Group checklist items by task
+  const checklistsByTask = new Map<string, any[]>();
+  checklistsSnap.docs.forEach(c => {
+    const taskId = c.data().taskId;
+    if (!checklistsByTask.has(taskId)) checklistsByTask.set(taskId, []);
+    checklistsByTask.get(taskId)!.push({ done: c.data().done });
+  });
+  
+  const tasks = tasksSnap.docs.map((doc) => {
+    const t = doc.data() as any;
+    const assignee = t.assigneeId ? (assigneesMap.get(t.assigneeId) as any) : null;
+    const kpi = t.kpiTemplateId ? (kpisMap.get(t.kpiTemplateId) as any) : null;
+    const checklistItems = checklistsByTask.get(doc.id) || [];
+    
+    return {
+      id: doc.id,
+      title: t.title,
+      status: t.status,
+      urgent: t.urgent,
+      important: t.important,
+      assigneeId: t.assigneeId,
+      dueAt: toDate(t.dueAt),
+      kpiTemplate: kpi ? { kpiName: kpi.kpiName } : null,
+      checklistItems,
+      assignee: assignee ? { id: t.assigneeId, name: assignee.name } : { id: t.assigneeId, name: "Unknown" },
+    };
+  });
 
   // Sort in JS — no composite index needed
   const kpiOptions = kpiOptionsSnap.docs

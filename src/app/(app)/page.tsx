@@ -14,6 +14,7 @@ import ThoughtSocial from "./_components/ThoughtSocial";
 import BirthdayWishes from "./_components/BirthdayWishes";
 import TaskAnalysisCard from "./_components/TaskAnalysisCard";
 import { relativeTime } from "@/lib/date";
+import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -85,42 +86,72 @@ export default async function Dashboard() {
   const closedTodayCount = closedTodayTasks.length;
   const celebrate = openTasks === 0 && closedTodayCount > 0;
 
-  // Announcements
-  const announcementsSnap = await adminDb.collection("Announcement").get();
-  announcementsSnap.docs.sort((a, b) => {
+  // Announcements - optimized with batch queries
+  const announcementsSnap = await cachedFetch(
+    'announcements',
+    () => adminDb.collection("Announcement").orderBy("createdAt", "desc").limit(6).get(),
+    30 // cache for 30 seconds
+  );
+  
+  const announcementsDocs = announcementsSnap.docs.sort((a, b) => {
     const pd = (b.data().pinned ? 1 : 0) - (a.data().pinned ? 1 : 0);
     if (pd !== 0) return pd;
     const at = a.data().createdAt?.toDate?.() ?? new Date(0);
     const bt = b.data().createdAt?.toDate?.() ?? new Date(0);
     return bt.getTime() - at.getTime();
+  }).slice(0, 6);
+  
+  // Batch fetch all related data
+  const authorIds = announcementsDocs.map(d => d.data().authorId).filter(Boolean) as string[];
+  const authorsMap = await batchFetchByIds('Employee', authorIds, adminDb);
+  
+  const announcementIds = announcementsDocs.map(d => d.id);
+  const [reactionsSnap, commentsSnap] = await Promise.all([
+    adminDb.collection("Reaction").where("announcementId", "in", announcementIds).get(),
+    adminDb.collection("Comment").where("announcementId", "in", announcementIds).get(),
+  ]);
+  
+  // Batch fetch comment authors
+  const commentEmployeeIds = commentsSnap.docs.map(c => c.data().employeeId).filter(Boolean) as string[];
+  const commentAuthorsMap = await batchFetchByIds('Employee', commentEmployeeIds, adminDb);
+  
+  // Group reactions and comments by announcement
+  const reactionsByAnnouncement = new Map<string, any[]>();
+  reactionsSnap.docs.forEach(r => {
+    const annId = r.data().announcementId;
+    if (!reactionsByAnnouncement.has(annId)) reactionsByAnnouncement.set(annId, []);
+    reactionsByAnnouncement.get(annId)!.push(r.data());
   });
-  announcementsSnap.docs.splice(6);
-  const announcements = await Promise.all(
-    announcementsSnap.docs.map(async (doc) => {
-      const a = doc.data() as any;
-      let authorData = null;
-      if (a.authorId) {
-        const authorDoc = await adminDb.collection("Employee").doc(a.authorId).get();
-        if (authorDoc.exists) authorData = authorDoc.data();
-      }
-      const reactionsSnap = await adminDb.collection("Reaction").where("announcementId", "==", doc.id).get();
-      const commentsSnap = await adminDb.collection("Comment").where("announcementId", "==", doc.id).get();
-      commentsSnap.docs.sort((a: any, b: any) => (a.data().createdAt?.toMillis?.() ?? 0) - (b.data().createdAt?.toMillis?.() ?? 0));
-      const comments = await Promise.all(
-        commentsSnap.docs.map(async (c: any) => {
-          const cd = c.data() as any;
-          const eDoc = await adminDb.collection("Employee").doc(cd.employeeId).get();
-          return { id: c.id, ...cd, createdAt: toDate(cd.createdAt), employee: { name: eDoc.exists ? eDoc.data()!.name : "Unknown" } };
-        })
-      );
-      return {
-        id: doc.id, ...a, 
-        author: authorData, 
-        reactions: reactionsSnap.docs.map(r => r.data()),
-        comments
-      };
-    })
-  );
+  
+  const commentsByAnnouncement = new Map<string, any[]>();
+  commentsSnap.docs.forEach(c => {
+    const annId = c.data().announcementId;
+    if (!commentsByAnnouncement.has(annId)) commentsByAnnouncement.set(annId, []);
+    const cd = c.data();
+    const author = commentAuthorsMap.get(cd.employeeId) as any;
+    commentsByAnnouncement.get(annId)!.push({
+      id: c.id,
+      ...cd,
+      createdAt: toDate(cd.createdAt),
+      employee: { name: author?.name ?? "Unknown" }
+    });
+  });
+  
+  // Sort comments within each announcement
+  commentsByAnnouncement.forEach(comments => {
+    comments.sort((a, b) => (a.createdAt?.getTime() ?? 0) - (b.createdAt?.getTime() ?? 0));
+  });
+  
+  const announcements = announcementsDocs.map(doc => {
+    const a = doc.data() as any;
+    return {
+      id: doc.id,
+      ...a,
+      author: authorsMap.get(a.authorId) || null,
+      reactions: reactionsByAnnouncement.get(doc.id) || [],
+      comments: commentsByAnnouncement.get(doc.id) || []
+    };
+  });
   
   const thought = announcements.find((a) => a.kind === "THOUGHT");
   const notices = announcements.filter((a) => a.kind !== "THOUGHT");
@@ -147,8 +178,12 @@ export default async function Dashboard() {
       }))
     : [];
 
-  // Birthdays
-  const bdayPeopleSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+  // Birthdays - optimized with caching
+  const bdayPeopleSnap = await cachedFetch(
+    'active-employees',
+    () => adminDb.collection("Employee").where("active", "==", true).get(),
+    300 // cache for 5 minutes
+  );
   const allPeople = bdayPeopleSnap.docs.map(d => ({ id: d.id, name: d.data().name, birthday: toDate(d.data().birthday) })).sort((a, b) => a.name.localeCompare(b.name));
   const bdayPeople = allPeople.filter(p => p.birthday);
   
@@ -162,13 +197,16 @@ export default async function Dashboard() {
     const wishesSnap = await adminDb.collection("BirthdayWish").where("forId", "==", wishTarget.id).where("year", "==", nowYear2).get();
     wishesSnap.docs.sort((a, b) => (b.data().createdAt?.toDate?.() ?? new Date(0)).getTime() - (a.data().createdAt?.toDate?.() ?? new Date(0)).getTime());
     wishesSnap.docs.splice(12);
-    wishesRaw = await Promise.all(
-      wishesSnap.docs.map(async (doc: any) => {
-        const w = doc.data() as any;
-        const eDoc = await adminDb.collection("Employee").doc(w.fromId).get();
-        return { id: doc.id, ...w, createdAt: toDate(w.createdAt), fromEmployee: { name: eDoc.exists ? eDoc.data()!.name : "Unknown" } };
-      })
-    );
+    
+    // Batch fetch wish authors
+    const fromIds = wishesSnap.docs.map(w => w.data().fromId).filter(Boolean) as string[];
+    const fromAuthorsMap = await batchFetchByIds('Employee', fromIds, adminDb);
+    
+    wishesRaw = wishesSnap.docs.map((doc: any) => {
+      const w = doc.data() as any;
+      const author = fromAuthorsMap.get(w.fromId) as any;
+      return { id: doc.id, ...w, createdAt: toDate(w.createdAt), fromEmployee: { name: author?.name ?? "Unknown" } };
+    });
   }
 
   const nameById = new Map(allPeople.map((p) => [p.id, p.name]));
@@ -180,31 +218,42 @@ export default async function Dashboard() {
     when: relativeTime(w.createdAt),
   }));
 
-  // Star of the month
-  const allPeriodsSnap = await adminDb.collection("MonthlyScorecard").get();
+  // Star of the month - optimized with batch queries
+  const allPeriodsSnap = await cachedFetch(
+    'all-monthly-scorecards',
+    () => adminDb.collection("MonthlyScorecard").orderBy("year", "desc").orderBy("month", "desc").limit(1).get(),
+    60 // cache for 1 minute
+  );
   const allPeriodDocs = allPeriodsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
-  const latestPeriodSnap = { empty: allPeriodDocs.length === 0, docs: allPeriodDocs.slice(0, 1) };
-  const latestPeriod = latestPeriodSnap.empty ? null : latestPeriodSnap.docs[0].data() as any;
+  const latestPeriod = allPeriodDocs.length === 0 ? null : allPeriodDocs[0].data() as any;
   
   let starBoard: any[] = [];
   if (latestPeriod) {
-    const sbSnap = await adminDb.collection("MonthlyScorecard").where("year", "==", latestPeriod.year).where("month", "==", latestPeriod.month).get();
+    const sbSnap = await adminDb.collection("MonthlyScorecard")
+      .where("year", "==", latestPeriod.year)
+      .where("month", "==", latestPeriod.month)
+      .get();
     
     // Sort in Javascript so we don't need a Firebase index!
     const sortedDocs = sbSnap.docs.sort((a, b) => b.data().total - a.data().total).slice(0, 6);
 
-    starBoard = await Promise.all(
-      sortedDocs.map(async (doc) => {
-        const sb = doc.data() as any;
-        const eDoc = await adminDb.collection("Employee").doc(sb.employeeId).get();
-        let roleData = { title: "Unknown" };
-        if (eDoc.exists && eDoc.data()!.roleId) {
-          const rDoc = await adminDb.collection("Role").doc(eDoc.data()!.roleId).get();
-          if (rDoc.exists) roleData = rDoc.data() as any;
-        }
-        return { id: doc.id, ...sb, employee: { ...eDoc.data(), role: roleData } };
-      })
-    );
+    // Batch fetch employees and roles
+    const employeeIds = sortedDocs.map(d => d.data().employeeId);
+    const employeesMap = await batchFetchByIds('Employee', employeeIds, adminDb);
+    
+    const roleIds = Array.from(new Set(
+      Object.values(employeesMap)
+        .map((e: any) => e.roleId)
+        .filter(Boolean)
+    )) as string[];
+    const rolesMap = await batchFetchByIds('Role', roleIds, adminDb);
+
+    starBoard = sortedDocs.map((doc) => {
+      const sb = doc.data() as any;
+      const employee = employeesMap.get(sb.employeeId) as any;
+      const roleData = employee?.roleId ? (rolesMap.get(employee.roleId) as any) || { title: "Unknown" } : { title: "Unknown" };
+      return { id: doc.id, ...sb, employee: { ...employee, role: roleData } };
+    });
   }
 
   return (

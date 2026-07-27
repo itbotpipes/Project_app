@@ -4,45 +4,72 @@ import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { Card, Badge } from "../_components/ui";
 import { monthLabel } from "@/lib/scores";
+import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
 export default async function PeoplePage() {
   const user = await getCurrentUser();
   if (!user) return null;
   if (!isManagerLike(user.systemRole)) redirect("/");
 
-  const employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
-
-  const employees = await Promise.all(
-    employeesSnap.docs.map(async (doc) => {
-      const emp = doc.data() as any;
-      let roleData: any = { title: "Unknown", department: null };
-      let reportsToName = "—";
-      let latestScorecard: any = null;
-
-      const [roleDoc, managerDoc, scorecardsSnap] = await Promise.all([
-        emp.roleId ? adminDb.collection("Role").doc(emp.roleId).get() : Promise.resolve(null),
-        emp.reportsToId ? adminDb.collection("Employee").doc(emp.reportsToId).get() : Promise.resolve(null),
-        adminDb.collection("MonthlyScorecard").where("employeeId", "==", doc.id).get(),
-      ]);
-
-      if (roleDoc?.exists) {
-        const role = roleDoc.data()!;
-        roleData.title = role.title;
-        if (role.departmentId) {
-          const deptDoc = await adminDb.collection("Department").doc(role.departmentId).get();
-          if (deptDoc.exists) roleData.department = { name: deptDoc.data()!.name };
-        }
-      }
-      if (managerDoc?.exists) reportsToName = managerDoc.data()!.name;
-      if (!scorecardsSnap.empty) {
-        // Sort in JS — no composite index needed
-        const sorted = scorecardsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
-        latestScorecard = sorted[0].data();
-      }
-
-      return { id: doc.id, ...emp, role: roleData, reportsTo: { name: reportsToName }, scorecards: latestScorecard ? [latestScorecard] : [] };
-    })
+  const employeesSnap = await cachedFetch(
+    'active-employees',
+    () => adminDb.collection("Employee").where("active", "==", true).get(),
+    300 // cache for 5 minutes
   );
+
+  // Batch fetch all related data
+  const roleIds = employeesSnap.docs.map(d => d.data().roleId).filter(Boolean) as string[];
+  const managerIds = employeesSnap.docs.map(d => d.data().reportsToId).filter(Boolean) as string[];
+  const employeeIds = employeesSnap.docs.map(d => d.id);
+  
+  const [rolesMap, managersMap, scorecardsSnap] = await Promise.all([
+    batchFetchByIds('Role', roleIds, adminDb),
+    batchFetchByIds('Employee', managerIds, adminDb),
+    adminDb.collection("MonthlyScorecard").where("employeeId", "in", employeeIds).get(),
+  ]);
+  
+  // Pre-fetch departments for roles
+  const deptIds = roleIds.map(rid => {
+    const role = rolesMap.get(rid) as any;
+    return role?.departmentId;
+  }).filter(Boolean) as string[];
+  const departmentsMap = await batchFetchByIds('Department', deptIds, adminDb);
+  
+  // Group scorecards by employee
+  const scorecardsByEmployee = new Map<string, any[]>();
+  scorecardsSnap.docs.forEach(doc => {
+    const empId = doc.data().employeeId;
+    if (!scorecardsByEmployee.has(empId)) scorecardsByEmployee.set(empId, []);
+    scorecardsByEmployee.get(empId)!.push(doc.data());
+  });
+  
+  // Sort scorecards for each employee and get latest
+  const latestScorecards = new Map<string, any>();
+  scorecardsByEmployee.forEach((cards, empId) => {
+    const sorted = cards.sort((a, b) => (b.year - a.year) || (b.month - a.month));
+    if (sorted.length > 0) latestScorecards.set(empId, sorted[0]);
+  });
+
+  const employees = employeesSnap.docs.map((doc) => {
+    const emp = doc.data() as any;
+    const role = emp.roleId ? (rolesMap.get(emp.roleId) as any) : null;
+    const manager = emp.reportsToId ? (managersMap.get(emp.reportsToId) as any) : null;
+    const department = role?.departmentId ? (departmentsMap.get(role.departmentId) as any) : null;
+    
+    const roleData: any = role 
+      ? { 
+          title: role.title, 
+          level: role.level,
+          department: department ? { name: department.name } : null 
+        }
+      : { title: "Unknown", department: null };
+    
+    const reportsToName = manager?.name ?? "—";
+    const latestScorecard = latestScorecards.get(doc.id) || null;
+
+    return { id: doc.id, ...emp, role: roleData, reportsTo: { name: reportsToName }, scorecards: latestScorecard ? [latestScorecard] : [] };
+  });
+  
   employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
 
   // group by department

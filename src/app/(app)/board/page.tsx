@@ -10,6 +10,7 @@ import AutoRefresh from "../_components/AutoRefresh";
 import NewTaskDialog from "./NewTaskDialog";
 import KanbanBoard from "./KanbanBoard";
 import { loadTemplateOptions } from "@/lib/templates";
+import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -36,49 +37,56 @@ export default async function BoardPage({
     .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
     .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }));
 
-  // Fetch related data for tasks
-  const tasks = await Promise.all(
-    tasksSnap.docs.map(async (doc) => {
-      const t = doc.data() as any;
-      let kpiTemplateName: string | null = null;
-      let projectName: string | null = null;
-      let creatorName: string | null = null;
-      let checklistItems: any[] = [];
-
-      const [kpiDoc, projectDoc, creatorDoc, checkSnap] = await Promise.all([
-        t.kpiTemplateId ? adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get() : Promise.resolve(null),
-        t.projectId ? adminDb.collection("Project").doc(t.projectId).get() : Promise.resolve(null),
-        t.creatorId ? adminDb.collection("Employee").doc(t.creatorId).get() : Promise.resolve(null),
-        adminDb.collection("ChecklistItem").where("taskId", "==", doc.id).get(),
-      ]);
-
-      if (kpiDoc?.exists) kpiTemplateName = kpiDoc.data()!.kpiName;
-      if (projectDoc?.exists) projectName = projectDoc.data()!.name;
-      if (creatorDoc?.exists) creatorName = creatorDoc.data()!.name;
-      checklistItems = checkSnap.docs.map((c) => ({ done: c.data().done }));
-
-      return {
-        id: doc.id,
-        title: t.title,
-        status: t.status,
-        sizeLabel: t.sizeLabel,
-        urgent: t.urgent,
-        important: t.important,
-        estimatedMins: t.estimatedMins,
-        dueAt: toDate(t.dueAt)?.toISOString() ?? null,
-        holdReason: t.holdReason,
-        reviewRequired: t.reviewRequired,
-        carryCount: t.carryCount ?? 0,
-        reworkCount: t.reworkCount ?? 0,
-        kpiTemplateId: t.kpiTemplateId ?? null,
-        creatorId: t.creatorId,
-        kpiTemplate: kpiTemplateName ? { kpiName: kpiTemplateName } : null,
-        project: projectName ? { name: projectName } : null,
-        creator: creatorName ? { name: creatorName } : null,
-        checklistItems,
-      };
-    })
-  );
+  // Fetch related data for tasks - optimized with batch queries
+  const taskIds = tasksSnap.docs.map(d => d.id);
+  const kpiIds = tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[];
+  const projectIds = tasksSnap.docs.map(d => d.data().projectId).filter(Boolean) as string[];
+  const creatorIds = tasksSnap.docs.map(d => d.data().creatorId).filter(Boolean) as string[];
+  
+  // Batch fetch all related data
+  const [kpisMap, projectsMap, creatorsMap, checklistsSnap] = await Promise.all([
+    batchFetchByIds('KpiTemplate', kpiIds, adminDb),
+    batchFetchByIds('Project', projectIds, adminDb),
+    batchFetchByIds('Employee', creatorIds, adminDb),
+    adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get(),
+  ]);
+  
+  // Group checklist items by task
+  const checklistsByTask = new Map<string, any[]>();
+  checklistsSnap.docs.forEach(c => {
+    const taskId = c.data().taskId;
+    if (!checklistsByTask.has(taskId)) checklistsByTask.set(taskId, []);
+    checklistsByTask.get(taskId)!.push({ done: c.data().done });
+  });
+  
+  const tasks = tasksSnap.docs.map((doc) => {
+    const t = doc.data() as any;
+    const kpi = kpiIds.includes(t.kpiTemplateId) ? kpisMap.get(t.kpiTemplateId) as any : null;
+    const project = projectIds.includes(t.projectId) ? projectsMap.get(t.projectId) as any : null;
+    const creator = creatorIds.includes(t.creatorId) ? creatorsMap.get(t.creatorId) as any : null;
+    const checklistItems = checklistsByTask.get(doc.id) || [];
+    
+    return {
+      id: doc.id,
+      title: t.title,
+      status: t.status,
+      sizeLabel: t.sizeLabel,
+      urgent: t.urgent,
+      important: t.important,
+      estimatedMins: t.estimatedMins,
+      dueAt: toDate(t.dueAt)?.toISOString() ?? null,
+      holdReason: t.holdReason,
+      reviewRequired: t.reviewRequired,
+      carryCount: t.carryCount ?? 0,
+      reworkCount: t.reworkCount ?? 0,
+      kpiTemplateId: t.kpiTemplateId ?? null,
+      creatorId: t.creatorId,
+      kpiTemplate: kpi ? { kpiName: kpi.kpiName } : null,
+      project: project ? { name: project.name } : null,
+      creator: creator ? { name: creator.name } : null,
+      checklistItems,
+    };
+  });
 
   // KPI bucket-balance check (this month) — single fetch, filter in JS
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
@@ -128,7 +136,11 @@ export default async function BoardPage({
   }
 
   const assignable = isManagerLike(user.systemRole)
-    ? (await adminDb.collection("Employee").where("active", "==", true).get()).docs
+    ? (await cachedFetch(
+        'active-employees',
+        () => adminDb.collection("Employee").where("active", "==", true).get(),
+        300 // cache for 5 minutes
+      )).docs
         .map((d) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
         .sort((a, b) => a.name.localeCompare(b.name))
         .filter((e) => e.id !== user.id)

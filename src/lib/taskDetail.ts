@@ -1,6 +1,7 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { isManagerLike } from "@/lib/auth";
 import { priorityQuadrant } from "@/lib/constants";
+import { batchFetchByIds } from "./cache";
 
 const PRIORITY_META: Record<string, { label: string; flag: string; tone: string }> = {
   "Do First": { label: "High", flag: "🚩", tone: "text-red-600" },
@@ -73,51 +74,46 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   activitySnap.docs.sort((a, b) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0));
   activitySnap.docs.splice(30);
 
-  // Fetch comment authors
-  const comments = await Promise.all(
-    commentsSnap.docs.map(async (c) => {
-      const d = c.data();
-      const authorDoc = await adminDb.collection("Employee").doc(d.authorId).get();
-      const author = authorDoc.exists ? authorDoc.data() : null;
-      return { id: c.id, body: d.body, createdAt: toISOSafe(d.createdAt), author: { name: author?.name ?? "", avatarUrl: author?.avatarUrl ?? null } };
-    })
-  );
+  // Batch fetch comment authors
+  const commentAuthorIds = commentsSnap.docs.map(c => c.data().authorId).filter(Boolean) as string[];
+  const commentAuthorsMap = await batchFetchByIds('Employee', commentAuthorIds, adminDb);
+  
+  const comments = commentsSnap.docs.map((c) => {
+    const d = c.data();
+    const author = commentAuthorsMap.get(d.authorId) as any;
+    return { id: c.id, body: d.body, createdAt: toISOSafe(d.createdAt), author: { name: author?.name ?? "", avatarUrl: author?.avatarUrl ?? null } };
+  });
 
-  // Fetch watcher employee data
-  const watchers = await Promise.all(
-    watchersSnap.docs.map(async (w) => {
-      const d = w.data();
-      const empDoc = await adminDb.collection("Employee").doc(d.employeeId).get();
-      const emp = empDoc.exists ? empDoc.data() : null;
-      return { id: w.id, employee: { id: d.employeeId, name: emp?.name ?? "", avatarUrl: emp?.avatarUrl ?? null } };
-    })
-  );
+  // Batch fetch watcher employee data
+  const watcherEmployeeIds = watchersSnap.docs.map(w => w.data().employeeId).filter(Boolean) as string[];
+  const watcherEmployeesMap = await batchFetchByIds('Employee', watcherEmployeeIds, adminDb);
+  
+  const watchers = watchersSnap.docs.map((w) => {
+    const d = w.data();
+    const emp = watcherEmployeesMap.get(d.employeeId) as any;
+    return { id: w.id, employee: { id: d.employeeId, name: emp?.name ?? "", avatarUrl: emp?.avatarUrl ?? null } };
+  });
 
-  // Fetch checklist doneBy
-  const checklistItems = await Promise.all(
-    checklistSnap.docs.map(async (c) => {
-      const d = c.data();
-      let doneByName: string | null = null;
-      if (d.doneById) {
-        const doneByDoc = await adminDb.collection("Employee").doc(d.doneById).get();
-        doneByName = doneByDoc.exists ? doneByDoc.data()!.name : null;
-      }
-      return { id: c.id, text: d.text, done: d.done, doneByName };
-    })
-  );
+  // Batch fetch checklist doneBy
+  const checklistDoneByIds = checklistSnap.docs.map(c => c.data().doneById).filter(Boolean) as string[];
+  const checklistDoneByMap = await batchFetchByIds('Employee', checklistDoneByIds, adminDb);
+  
+  const checklistItems = checklistSnap.docs.map((c) => {
+    const d = c.data();
+    const doneBy = d.doneById ? (checklistDoneByMap.get(d.doneById) as any) : null;
+    const doneByName = doneBy?.name ?? null;
+    return { id: c.id, text: d.text, done: d.done, doneByName };
+  });
 
-  // Fetch activity actors
-  const activity = await Promise.all(
-    activitySnap.docs.map(async (a) => {
-      const d = a.data();
-      let actor = null;
-      if (d.actorId) {
-        const actorDoc = await adminDb.collection("Employee").doc(d.actorId).get();
-        if (actorDoc.exists) actor = { name: actorDoc.data()!.name, avatarUrl: actorDoc.data()!.avatarUrl ?? null };
-      }
-      return { id: a.id, action: d.action, detail: d.detail, createdAt: toISOSafe(d.createdAt), actor };
-    })
-  );
+  // Batch fetch activity actors
+  const activityActorIds = activitySnap.docs.map(a => a.data().actorId).filter(Boolean) as string[];
+  const activityActorsMap = await batchFetchByIds('Employee', activityActorIds, adminDb);
+  
+  const activity = activitySnap.docs.map((a) => {
+    const d = a.data();
+    const actor = d.actorId ? (activityActorsMap.get(d.actorId) as any) : null;
+    return { id: a.id, action: d.action, detail: d.detail, createdAt: toISOSafe(d.createdAt), actor: actor ? { name: actor.name, avatarUrl: actor.avatarUrl ?? null } : null };
+  });
 
   const quad = priorityQuadrant(task.urgent, task.important);
   const priorityMeta = PRIORITY_META[quad];
