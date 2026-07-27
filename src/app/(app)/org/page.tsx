@@ -22,7 +22,7 @@ export default async function OrgChartPage({
   ]);
 
   // Resolve role for each employee
-  const employees = await Promise.all(
+  const employees = employeesSnap.docs ? await Promise.all(
     employeesSnap.docs.map(async (doc) => {
       const emp = doc.data() as any;
       let roleTitle = "Unknown";
@@ -36,9 +36,9 @@ export default async function OrgChartPage({
       }
       return { id: doc.id, ...emp, role: { title: roleTitle, departmentId: roleDepartmentId } };
     })
-  );
+  ) : [];
   employees.sort((a: any, b: any) => a.name.localeCompare(b.name));
-  const departments = departmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  const departments = departmentsSnap.docs ? departmentsSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[] : [];
 
   const topPerson = employees.find((e: any) => !e.reportsToId);
 

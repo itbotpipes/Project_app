@@ -18,9 +18,9 @@ export default async function PeoplePage() {
   );
 
   // Batch fetch all related data
-  const roleIds = employeesSnap.docs.map(d => d.data().roleId).filter(Boolean) as string[];
-  const managerIds = employeesSnap.docs.map(d => d.data().reportsToId).filter(Boolean) as string[];
-  const employeeIds = employeesSnap.docs.map(d => d.id);
+  const roleIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];
+  const managerIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.data().reportsToId).filter(Boolean) as string[] : [];
+  const employeeIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.id) : [];
   
   const [rolesMap, managersMap, scorecardsSnap] = await Promise.all([
     batchFetchByIds('Role', roleIds, adminDb),
@@ -50,7 +50,7 @@ export default async function PeoplePage() {
     if (sorted.length > 0) latestScorecards.set(empId, sorted[0]);
   });
 
-  const employees = employeesSnap.docs.map((doc) => {
+  const employees = employeesSnap.docs ? employeesSnap.docs.map((doc) => {
     const emp = doc.data() as any;
     const role = emp.roleId ? (rolesMap.get(emp.roleId) as any) : null;
     const manager = emp.reportsToId ? (managersMap.get(emp.reportsToId) as any) : null;
@@ -68,7 +68,7 @@ export default async function PeoplePage() {
     const latestScorecard = latestScorecards.get(doc.id) || null;
 
     return { id: doc.id, ...emp, role: roleData, reportsTo: { name: reportsToName }, scorecards: latestScorecard ? [latestScorecard] : [] };
-  });
+  }) : [];
   
   employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
 
