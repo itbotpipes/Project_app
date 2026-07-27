@@ -2,6 +2,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
 import { behaviourPct, behaviourPctFromMany } from "@/lib/behaviour";
+import { fetchKpiTemplatesByRole, batchFetchByIds } from "@/lib/cache";
 
 export function readiness(avg: number) {
   if (avg >= 75) return { label: "Ready for promotion", tone: "bg-emerald-100 text-emerald-700" };
@@ -62,17 +63,20 @@ export async function loadEmployeePerformance(employeeId: string) {
   });
 
   const employee = employeeDoc.exists ? { id: employeeDoc.id, ...employeeDoc.data() } as any : null;
-  let roleData: any = null;
-  if (employee?.roleId) {
-    const roleDoc = await adminDb.collection("Role").doc(employee.roleId).get();
-    if (roleDoc.exists) roleData = { id: roleDoc.id, ...roleDoc.data() };
-  }
+  
+  // Batch fetch role using cached data
+  const roleIds = employee?.roleId ? [employee.roleId] : [];
+  const rolesMap = await batchFetchByIds('Role', roleIds, adminDb);
+  const roleData = employee?.roleId ? (rolesMap.get(employee.roleId) as any) : null;
   const employeeWithRole = employee ? { ...employee, role: roleData } : null;
 
-  const kpis = employee?.roleId
-    ? (await adminDb.collection("KpiTemplate").where("roleId", "==", employee.roleId).get()).docs
-        .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-        .map((d) => ({ id: d.id, ...d.data() })) as any[]
+  // Use cached KPI templates
+  const kpiTemplatesSnap = employee?.roleId
+    ? await fetchKpiTemplatesByRole(employee.roleId, adminDb)
+    : { docs: [] } as any;
+  const kpis = kpiTemplatesSnap.docs ? kpiTemplatesSnap.docs
+    .sort((a: any, b: any) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
+    .map((d: any) => ({ id: d.id, ...d.data() })) as any[]
     : [];
 
   const kraMap = new Map<string, number>();

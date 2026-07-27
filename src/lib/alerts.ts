@@ -1,6 +1,7 @@
 import "server-only";
 import { adminDb } from "./firebase/admin";
 import { isManagerLike } from "./auth";
+import { batchFetchByIds } from "./cache";
 
 export type Alert = { id: string; text: string; href: string; tone: "red" | "amber" | "blue" };
 
@@ -120,13 +121,14 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
       const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
       const py = prevStart.getFullYear();
       const pm = prevStart.getMonth() + 1;
-      const prevCards = await Promise.all(
-        reportIds.map((id) =>
-          adminDb.collection("MonthlyScorecard").where("employeeId", "==", id).where("year", "==", py).where("month", "==", pm).limit(1).get()
-        )
-      );
+      
+      // Batch fetch scorecards instead of N+1 queries
+      const scorecardsSnap = reportIds.length > 0 
+        ? await adminDb.collection("MonthlyScorecard").where("employeeId", "in", reportIds).where("year", "==", py).where("month", "==", pm).get()
+        : { docs: [] } as any;
+      
       const finalized = new Set(
-        prevCards.flatMap((snap) => snap.docs.filter((d) => d.data().source !== "auto").map((d) => d.data().employeeId))
+        scorecardsSnap.docs?.filter((d: any) => d.data().source !== "auto").map((d: any) => d.data().employeeId) ?? []
       );
       const pending = reportIds.filter((id) => !finalized.has(id)).length;
       const monthName = prevStart.toLocaleDateString("en-IN", { month: "long" });
@@ -146,14 +148,15 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
     const pm = prevStart.getMonth() + 1;
     const monthName = prevStart.toLocaleDateString("en-IN", { month: "long" });
     const activeSnap = await adminDb.collection("Employee").where("active", "==", true).get();
-    const activeIds = activeSnap.docs ? activeSnap.docs.map((d) => d.id) : [];
-    const cards = await Promise.all(
-      activeIds.map((id) =>
-        adminDb.collection("MonthlyScorecard").where("employeeId", "==", id).where("year", "==", py).where("month", "==", pm).limit(1).get()
-      )
-    );
+    const activeIds = activeSnap.docs ? activeSnap.docs.map((d: any) => d.id) : [];
+    
+    // Batch fetch scorecards instead of N+1 queries
+    const cardsSnap = activeIds.length > 0
+      ? await adminDb.collection("MonthlyScorecard").where("employeeId", "in", activeIds).where("year", "==", py).where("month", "==", pm).get()
+      : { docs: [] } as any;
+    
     const finalized = new Set(
-      cards.flatMap((snap) => snap.docs.filter((d) => d.data().source !== "auto").map((d) => d.data().employeeId))
+      cardsSnap.docs?.filter((d: any) => d.data().source !== "auto").map((d: any) => d.data().employeeId) ?? []
     );
     const pending = activeIds.filter((id) => !finalized.has(id)).length;
     if (pending > 0)

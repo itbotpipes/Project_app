@@ -1,6 +1,7 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { mondayOf } from "@/lib/date";
 import { computeAdherence, type AdherenceResult } from "@/lib/adherence";
+import { fetchKpiTemplatesByRole } from "@/lib/cache";
 
 export type KpiFocus = { id: string; name: string; count: number; weightage: number };
 
@@ -34,38 +35,34 @@ export async function loadDailyTaskAnalysis(employeeId: string): Promise<DailyTa
   todayEnd.setDate(todayEnd.getDate() + 1);
   const weekStart = mondayOf();
 
-  const [
-    employeeDoc,
-    closedTodaySnap,
-    closedWeekSnap,
-    ritualSnap,
-    reworkTodaySnap,
-    reworkWeekSnap,
-    openReworkSnap,
-    uiOpenSnap,
-    uiDueTodaySnap,
-    weekTasksSnap,
-  ] = await Promise.all([
+  // Optimize: Consolidate 9 queries into 3 queries + 1 cached KPI fetch
+  const [employeeDoc, allTasksSnap, ritualSnap] = await Promise.all([
     adminDb.collection("Employee").doc(employeeId).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).where("status", "==", "CLOSED").get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).where("status", "==", "CLOSED").get(),
+    adminDb.collection("Task").where("assigneeId", "==", employeeId).get(),
     adminDb.collection("DailyRitual").where("employeeId", "==", employeeId).where("date", "==", todayStart).limit(1).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).where("urgent", "==", true).where("important", "==", true).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).where("urgent", "==", true).where("important", "==", true).get(),
-    adminDb.collection("Task").where("assigneeId", "==", employeeId).get(),
   ]);
 
-  // Filter in JS to avoid requiring Firebase composite indexes
-  const closedAllSnap = closedTodaySnap; // reuse the full closed snap
-  const closedTodayTasks = closedTodaySnap.docs
-    .filter(d => { const c = toDate(d.data().completedAt); return c && c >= todayStart && c < todayEnd; })
-    .map(d => ({ id: d.id, dueAt: toDate(d.data().dueAt), completedAt: toDate(d.data().completedAt) }));
-  const closedWeekTasks = closedWeekSnap.docs
-    .filter(d => { const c = toDate(d.data().completedAt); return c && c >= weekStart; })
-    .map(d => ({ dueAt: toDate(d.data().dueAt), completedAt: toDate(d.data().completedAt) }));
+  // Get cached KPI templates after we have employee data
+  const employee = employeeDoc.exists ? employeeDoc.data() : null;
+  const kpiTemplatesSnap = employee?.roleId
+    ? await fetchKpiTemplatesByRole(employee.roleId, adminDb)
+    : { docs: [] } as any;
+
+  // Filter all tasks in JS to avoid requiring Firebase composite indexes
+  const allTasks = allTasksSnap.docs ? allTasksSnap.docs : [];
+  
+  const closedTodayTasks = allTasks
+    .filter((d: any) => {
+      const c = toDate(d.data().completedAt);
+      return d.data().status === "CLOSED" && c && c >= todayStart && c < todayEnd;
+    })
+    .map((d: any) => ({ id: d.id, dueAt: toDate(d.data().dueAt), completedAt: toDate(d.data().completedAt) }));
+  const closedWeekTasks = allTasks
+    .filter((d: any) => {
+      const c = toDate(d.data().completedAt);
+      return d.data().status === "CLOSED" && c && c >= weekStart;
+    })
+    .map((d: any) => ({ dueAt: toDate(d.data().dueAt), completedAt: toDate(d.data().completedAt) }));
 
   const onTimeToday = closedTodayTasks.filter((t) => !t.dueAt || (t.completedAt && t.completedAt <= t.dueAt!)).length;
   const lateToday = closedTodayTasks.length - onTimeToday;
@@ -76,29 +73,33 @@ export async function loadDailyTaskAnalysis(employeeId: string): Promise<DailyTa
   const ritual = !ritualSnap.empty ? ritualSnap.docs[0].data() : null;
   const adherence = computeAdherence(ritual?.plannedTaskIds ?? null, closedTodayIds);
 
-  const employee = employeeDoc.exists ? employeeDoc.data() : null;
-  const kpiOptions = employee?.roleId
-    ? (await adminDb.collection("KpiTemplate").where("roleId", "==", employee.roleId).get()).docs
-        .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-        .map((d) => ({ id: d.id, ...d.data() })) as any[]
+  const kpiOptions = kpiTemplatesSnap.docs ? kpiTemplatesSnap.docs
+    .sort((a: any, b: any) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
+    .map((d: any) => ({ id: d.id, ...d.data() })) as any[]
     : [];
 
   // Filter week tasks in JS
-  const weekTasksFiltered = weekTasksSnap.docs.filter(d => {
+  const weekTasksFiltered = allTasks.filter((d: any) => {
     const c = toDate(d.data().createdAt);
     return c && c >= weekStart && !d.data().deletedAt;
   });
   // Rejection filtering in JS
-  const reworkTodayCount = reworkTodaySnap.docs.filter(d => { const r = toDate(d.data().rejectedAt); return r && r >= todayStart && r < todayEnd; }).length;
-  const reworkWeekCount = reworkWeekSnap.docs.filter(d => { const r = toDate(d.data().rejectedAt); return r && r >= weekStart; }).length;
+  const reworkTodayCount = allTasks.filter((d: any) => {
+    const r = toDate(d.data().rejectedAt);
+    return r && r >= todayStart && r < todayEnd;
+  }).length;
+  const reworkWeekCount = allTasks.filter((d: any) => {
+    const r = toDate(d.data().rejectedAt);
+    return r && r >= weekStart;
+  }).length;
   // openRework: REOPENED and not deleted
-  const openReworkCount = openReworkSnap.docs.filter(d => d.data().status === "REOPENED" && !d.data().deletedAt).length;
+  const openReworkCount = allTasks.filter((d: any) => d.data().status === "REOPENED" && !d.data().deletedAt).length;
   // urgent+important open, not deleted
-  const uiOpenCount = uiOpenSnap.docs.filter(d => d.data().status !== "CLOSED" && !d.data().deletedAt).length;
+  const uiOpenCount = allTasks.filter((d: any) => d.data().urgent && d.data().important && d.data().status !== "CLOSED" && !d.data().deletedAt).length;
   // urgent+important due today
-  const uiDueTodayCount = uiDueTodaySnap.docs.filter(d => {
+  const uiDueTodayCount = allTasks.filter((d: any) => {
     const due = toDate(d.data().dueAt);
-    return d.data().status !== "CLOSED" && due && due >= todayStart && due < todayEnd;
+    return d.data().urgent && d.data().important && d.data().status !== "CLOSED" && due && due >= todayStart && due < todayEnd;
   }).length;
 
   const countByKpi = new Map<string, number>();
