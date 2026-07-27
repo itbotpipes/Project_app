@@ -93,13 +93,13 @@ export default async function Dashboard() {
     30 // cache for 30 seconds
   );
   
-  const announcementsDocs = announcementsSnap.docs.sort((a, b) => {
+  const announcementsDocs = announcementsSnap.docs ? announcementsSnap.docs.sort((a, b) => {
     const pd = (b.data().pinned ? 1 : 0) - (a.data().pinned ? 1 : 0);
     if (pd !== 0) return pd;
     const at = a.data().createdAt?.toDate?.() ?? new Date(0);
     const bt = b.data().createdAt?.toDate?.() ?? new Date(0);
     return bt.getTime() - at.getTime();
-  }).slice(0, 6);
+  }).slice(0, 6) : [];
   
   // Batch fetch all related data
   const authorIds = announcementsDocs.map(d => d.data().authorId).filter(Boolean) as string[];
@@ -184,7 +184,7 @@ export default async function Dashboard() {
     () => adminDb.collection("Employee").where("active", "==", true).get(),
     300 // cache for 5 minutes
   );
-  const allPeople = bdayPeopleSnap.docs.map(d => ({ id: d.id, name: d.data().name, birthday: toDate(d.data().birthday) })).sort((a, b) => a.name.localeCompare(b.name));
+  const allPeople = bdayPeopleSnap.docs ? bdayPeopleSnap.docs.map(d => ({ id: d.id, name: d.data().name, birthday: toDate(d.data().birthday) })).sort((a, b) => a.name.localeCompare(b.name)) : [];
   const bdayPeople = allPeople.filter(p => p.birthday);
   
   const birthdays = upcomingBirthdays(bdayPeople, 21).slice(0, 4);
@@ -195,18 +195,20 @@ export default async function Dashboard() {
   let wishesRaw: any[] = [];
   if (wishTarget) {
     const wishesSnap = await adminDb.collection("BirthdayWish").where("forId", "==", wishTarget.id).where("year", "==", nowYear2).get();
-    wishesSnap.docs.sort((a, b) => (b.data().createdAt?.toDate?.() ?? new Date(0)).getTime() - (a.data().createdAt?.toDate?.() ?? new Date(0)).getTime());
-    wishesSnap.docs.splice(12);
-    
-    // Batch fetch wish authors
-    const fromIds = wishesSnap.docs.map(w => w.data().fromId).filter(Boolean) as string[];
-    const fromAuthorsMap = await batchFetchByIds('Employee', fromIds, adminDb);
-    
-    wishesRaw = wishesSnap.docs.map((doc: any) => {
-      const w = doc.data() as any;
-      const author = fromAuthorsMap.get(w.fromId) as any;
-      return { id: doc.id, ...w, createdAt: toDate(w.createdAt), fromEmployee: { name: author?.name ?? "Unknown" } };
-    });
+    if (wishesSnap.docs) {
+      wishesSnap.docs.sort((a, b) => (b.data().createdAt?.toDate?.() ?? new Date(0)).getTime() - (a.data().createdAt?.toDate?.() ?? new Date(0)).getTime());
+      wishesSnap.docs.splice(12);
+      
+      // Batch fetch wish authors
+      const fromIds = wishesSnap.docs.map(w => w.data().fromId).filter(Boolean) as string[];
+      const fromAuthorsMap = await batchFetchByIds('Employee', fromIds, adminDb);
+      
+      wishesRaw = wishesSnap.docs.map((doc: any) => {
+        const w = doc.data() as any;
+        const author = fromAuthorsMap.get(w.fromId) as any;
+        return { id: doc.id, ...w, createdAt: toDate(w.createdAt), fromEmployee: { name: author?.name ?? "Unknown" } };
+      });
+    }
   }
 
   const nameById = new Map(allPeople.map((p) => [p.id, p.name]));
@@ -235,7 +237,7 @@ export default async function Dashboard() {
       .get();
     
     // Sort in Javascript so we don't need a Firebase index!
-    const sortedDocs = sbSnap.docs.sort((a, b) => b.data().total - a.data().total).slice(0, 6);
+    const sortedDocs = sbSnap.docs ? sbSnap.docs.sort((a, b) => b.data().total - a.data().total).slice(0, 6) : [];
 
     // Batch fetch employees and roles
     const employeeIds = sortedDocs.map(d => d.data().employeeId);
