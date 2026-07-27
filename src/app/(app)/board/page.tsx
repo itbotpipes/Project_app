@@ -48,7 +48,7 @@ export default async function BoardPage({
     batchFetchByIds('KpiTemplate', kpiIds, adminDb),
     batchFetchByIds('Project', projectIds, adminDb),
     batchFetchByIds('Employee', creatorIds, adminDb),
-    adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get(),
+    taskIds.length > 0 ? adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get() : Promise.resolve({ docs: [] } as any),
   ]);
   
   // Group checklist items by task

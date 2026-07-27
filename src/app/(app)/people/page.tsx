@@ -25,7 +25,7 @@ export default async function PeoplePage() {
   const [rolesMap, managersMap, scorecardsSnap] = await Promise.all([
     batchFetchByIds('Role', roleIds, adminDb),
     batchFetchByIds('Employee', managerIds, adminDb),
-    adminDb.collection("MonthlyScorecard").where("employeeId", "in", employeeIds).get(),
+    employeeIds.length > 0 ? adminDb.collection("MonthlyScorecard").where("employeeId", "in", employeeIds).get() : Promise.resolve({ docs: [] } as any),
   ]);
   
   // Pre-fetch departments for roles

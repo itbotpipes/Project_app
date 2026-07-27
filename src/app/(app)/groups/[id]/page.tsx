@@ -82,7 +82,7 @@ export default async function GroupDetailPage({
   const [assigneesMap, kpisMap, checklistsSnap] = await Promise.all([
     batchFetchByIds('Employee', assigneeIds, adminDb),
     batchFetchByIds('KpiTemplate', kpiIds, adminDb),
-    adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get(),
+    taskIds.length > 0 ? adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get() : Promise.resolve({ docs: [] } as any),
   ]);
   
   // Group checklist items by task

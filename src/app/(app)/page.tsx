@@ -107,8 +107,8 @@ export default async function Dashboard() {
   
   const announcementIds = announcementsDocs.map(d => d.id);
   const [reactionsSnap, commentsSnap] = await Promise.all([
-    adminDb.collection("Reaction").where("announcementId", "in", announcementIds).get(),
-    adminDb.collection("Comment").where("announcementId", "in", announcementIds).get(),
+    announcementIds.length > 0 ? adminDb.collection("Reaction").where("announcementId", "in", announcementIds).get() : Promise.resolve({ docs: [] } as any),
+    announcementIds.length > 0 ? adminDb.collection("Comment").where("announcementId", "in", announcementIds).get() : Promise.resolve({ docs: [] } as any),
   ]);
   
   // Batch fetch comment authors
