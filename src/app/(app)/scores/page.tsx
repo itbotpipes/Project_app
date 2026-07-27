@@ -33,7 +33,7 @@ export default async function ScoresPage({
     employeesSnap = await adminDb.collection("Employee").where("active", "==", true).where("reportsToId", "==", user.id).get();
   }
   
-  const employees = await Promise.all(
+  const employees = employeesSnap.docs ? await Promise.all(
     employeesSnap.docs.map(async (doc) => {
       const emp = doc.data() as any;
       let roleData = { title: "Unknown", department: null as any };
@@ -50,7 +50,7 @@ export default async function ScoresPage({
       }
       return { id: doc.id, ...emp, role: roleData };
     })
-  );
+  ) : [];
   employees.sort((a, b) => (a.role?.level ?? 99) - (b.role?.level ?? 99) || a.name.localeCompare(b.name));
   
   const empIds = employees.map((e) => e.id);

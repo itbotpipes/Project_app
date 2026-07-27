@@ -40,7 +40,7 @@ export async function saveMonthlyScorecard(formData: FormData) {
   const employee = employeeDoc.data()!;
 
   const kpisSnap = await adminDb.collection("KpiTemplate").where("roleId", "==", employee.roleId).get();
-  const kpis = kpisSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  const kpis = kpisSnap.docs ? kpisSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[] : [];
 
   const monthStart = new Date(year, month - 1, 1);
   const monthEnd = new Date(year, month, 1);

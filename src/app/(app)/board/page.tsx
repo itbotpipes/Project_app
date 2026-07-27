@@ -33,15 +33,15 @@ export default async function BoardPage({
     adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
   ]);
 
-  const kpiOptions = kpiOptionsSnap.docs
+  const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
     .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }));
+    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName })) : [];
 
   // Fetch related data for tasks - optimized with batch queries
-  const taskIds = tasksSnap.docs.map(d => d.id);
-  const kpiIds = tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[];
-  const projectIds = tasksSnap.docs.map(d => d.data().projectId).filter(Boolean) as string[];
-  const creatorIds = tasksSnap.docs.map(d => d.data().creatorId).filter(Boolean) as string[];
+  const taskIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.id) : [];
+  const kpiIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[] : [];
+  const projectIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().projectId).filter(Boolean) as string[] : [];
+  const creatorIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().creatorId).filter(Boolean) as string[] : [];
   
   // Batch fetch all related data
   const [kpisMap, projectsMap, creatorsMap, checklistsSnap] = await Promise.all([
@@ -53,13 +53,13 @@ export default async function BoardPage({
   
   // Group checklist items by task
   const checklistsByTask = new Map<string, any[]>();
-  checklistsSnap.docs.forEach(c => {
+  checklistsSnap.docs?.forEach((c: any) => {
     const taskId = c.data().taskId;
     if (!checklistsByTask.has(taskId)) checklistsByTask.set(taskId, []);
     checklistsByTask.get(taskId)!.push({ done: c.data().done });
   });
   
-  const tasks = tasksSnap.docs.map((doc) => {
+  const tasks = tasksSnap.docs ? tasksSnap.docs.map((doc) => {
     const t = doc.data() as any;
     const kpi = kpiIds.includes(t.kpiTemplateId) ? kpisMap.get(t.kpiTemplateId) as any : null;
     const project = projectIds.includes(t.projectId) ? projectsMap.get(t.projectId) as any : null;
@@ -86,14 +86,14 @@ export default async function BoardPage({
       creator: creator ? { name: creator.name } : null,
       checklistItems,
     };
-  });
+  }) : [];
 
   // KPI bucket-balance check (this month) — single fetch, filter in JS
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const startOfMonthMs = startOfMonth.getTime();
   // Fetch all user tasks for date-based stats (separate from the board tasks which exclude deleted)
   const allUserTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).get();
-  const allUserTasks = allUserTasksSnap.docs;
+  const allUserTasks = allUserTasksSnap.docs || [];
 
   const workedBuckets = new Set(
     allUserTasks
@@ -140,15 +140,14 @@ export default async function BoardPage({
         'active-employees',
         () => adminDb.collection("Employee").where("active", "==", true).get(),
         300 // cache for 5 minutes
-      )).docs
-        .map((d) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
+      )).docs?.map((d) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
         .sort((a, b) => a.name.localeCompare(b.name))
-        .filter((e) => e.id !== user.id)
+        .filter((e) => e.id !== user.id) || []
     : [];
   const people = [{ id: user.id, name: `${user.name} (me)`, roleId: user.roleId }, ...assignable];
   const templates = await loadTemplateOptions();
 
-  const boardTasks = tasks.map((t) => ({
+  const boardTasks = tasks ? tasks.map((t) => ({
     id: t.id,
     title: t.title,
     status: t.status,
@@ -167,7 +166,7 @@ export default async function BoardPage({
       t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name ?? null : null,
     checklistTotal: t.checklistItems.length,
     checklistDone: t.checklistItems.filter((c: any) => c.done).length,
-  }));
+  })) : [];
 
   return (
     <div className="space-y-4">
@@ -175,7 +174,7 @@ export default async function BoardPage({
         <div>
           <h1 className="text-2xl font-semibold">My Board</h1>
           <p className="text-sm text-slate-500">
-            {tasks.length} task{tasks.length === 1 ? "" : "s"} · every task fills a KPI bucket
+            {tasks?.length ?? 0} task{(tasks?.length ?? 0) === 1 ? "" : "s"} · every task fills a KPI bucket
           </p>
         </div>
         <NewTaskDialog kpiOptions={kpiOptions} people={people} selfId={user.id} todaysCounts={todaysCounts} templates={templates} />

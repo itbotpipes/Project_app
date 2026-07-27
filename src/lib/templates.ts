@@ -4,7 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 // Task" modal can offer "start from a template" instead of retyping.
 export async function loadTemplateOptions() {
   const templatesSnap = await adminDb.collection("TaskTemplate").orderBy("createdAt", "desc").get();
-  return templatesSnap.docs.map((doc) => {
+  return templatesSnap.docs ? templatesSnap.docs.map((doc) => {
     const t = doc.data() as any;
     return {
       id: doc.id,
@@ -17,5 +17,5 @@ export async function loadTemplateOptions() {
       roleId: t.roleId,
       checklist: (t.checklistJSON ? JSON.parse(t.checklistJSON) : []) as string[],
     };
-  });
+  }) : [];
 }

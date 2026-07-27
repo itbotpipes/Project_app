@@ -79,7 +79,7 @@ export default async function Dashboard() {
 
   // Streak & badges
   const completedSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get();
-  const completedDates = completedSnap.docs.map(d => toDate(d.data().completedAt)).filter(Boolean) as Date[];
+  const completedDates = completedSnap.docs ? completedSnap.docs.map((d: any) => toDate(d.data().completedAt)).filter(Boolean) as Date[] : [];
   const streak = computeStreak(completedDates);
   const badges = streakBadges(streak);
   
@@ -112,19 +112,19 @@ export default async function Dashboard() {
   ]);
   
   // Batch fetch comment authors
-  const commentEmployeeIds = commentsSnap.docs.map(c => c.data().employeeId).filter(Boolean) as string[];
+  const commentEmployeeIds = commentsSnap.docs?.map((c: any) => c.data().employeeId).filter(Boolean) as string[];
   const commentAuthorsMap = await batchFetchByIds('Employee', commentEmployeeIds, adminDb);
   
   // Group reactions and comments by announcement
   const reactionsByAnnouncement = new Map<string, any[]>();
-  reactionsSnap.docs.forEach(r => {
+  reactionsSnap.docs?.forEach((r: any) => {
     const annId = r.data().announcementId;
     if (!reactionsByAnnouncement.has(annId)) reactionsByAnnouncement.set(annId, []);
     reactionsByAnnouncement.get(annId)!.push(r.data());
   });
   
   const commentsByAnnouncement = new Map<string, any[]>();
-  commentsSnap.docs.forEach(c => {
+  commentsSnap.docs?.forEach((c: any) => {
     const annId = c.data().announcementId;
     if (!commentsByAnnouncement.has(annId)) commentsByAnnouncement.set(annId, []);
     const cd = c.data();
@@ -200,14 +200,14 @@ export default async function Dashboard() {
       wishesSnap.docs.splice(12);
       
       // Batch fetch wish authors
-      const fromIds = wishesSnap.docs.map(w => w.data().fromId).filter(Boolean) as string[];
+      const fromIds = wishesSnap.docs ? wishesSnap.docs.map((w: any) => w.data().fromId).filter(Boolean) as string[] : [];
       const fromAuthorsMap = await batchFetchByIds('Employee', fromIds, adminDb);
       
-      wishesRaw = wishesSnap.docs.map((doc: any) => {
+      wishesRaw = wishesSnap.docs ? wishesSnap.docs.map((doc: any) => {
         const w = doc.data() as any;
         const author = fromAuthorsMap.get(w.fromId) as any;
         return { id: doc.id, ...w, createdAt: toDate(w.createdAt), fromEmployee: { name: author?.name ?? "Unknown" } };
-      });
+      }) : [];
     }
   }
 

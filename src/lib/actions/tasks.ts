@@ -31,7 +31,7 @@ export async function createTask(formData: FormData) {
   let groupMemberIds: string[] = [];
   if (groupId) {
     const membersSnap = await adminDb.collection("GroupMember").where("groupId", "==", groupId).get();
-    groupMemberIds = membersSnap.docs.map(doc => doc.data().employeeId);
+    groupMemberIds = membersSnap.docs ? membersSnap.docs.map((doc: any) => doc.data().employeeId) : [];
   }
   
   const allWatcherIds = Array.from(new Set([...watcherIds, ...groupMemberIds])).filter((id) => id !== assigneeId);

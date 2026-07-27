@@ -16,17 +16,17 @@ export default async function TemplatesPage() {
     adminDb.collection("Employee").where("active", "==", true).get(),
   ]);
 
-  const kpiOptions = kpiOptionsSnap.docs
+  const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
     .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map(d => ({ id: d.id, kpiName: d.data().kpiName, roleId: d.data().roleId }));
-  const roles = rolesSnap.docs
+    .map((d: any) => ({ id: d.id, kpiName: d.data().kpiName, roleId: d.data().roleId })) : [];
+  const roles = rolesSnap.docs ? rolesSnap.docs
     .sort((a, b) => (a.data().level ?? 99) - (b.data().level ?? 99))
-    .map(d => ({ id: d.id, title: d.data().title }));
-  const people = peopleSnap.docs
-    .map(d => ({ id: d.id, name: d.data().name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .map((d: any) => ({ id: d.id, title: d.data().title })) : [];
+  const people = peopleSnap.docs ? peopleSnap.docs
+    .map((d: any) => ({ id: d.id, name: d.data().name }))
+    .sort((a, b) => a.name.localeCompare(b.name)) : [];
 
-  const templates = (await Promise.all(
+  const templates = templatesSnap.docs ? (await Promise.all(
     templatesSnap.docs.map(async (doc) => {
       const t = doc.data() as any;
       const [kpiDoc, roleDoc, creatorDoc] = await Promise.all([
@@ -41,7 +41,7 @@ export default async function TemplatesPage() {
         createdBy: creatorDoc?.exists ? { name: creatorDoc.data()!.name } : null,
       };
     })
-  )).sort((a: any, b: any) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0));
+  )).sort((a: any, b: any) => (b.createdAt?.toMillis?.() ?? 0) - (a.createdAt?.toMillis?.() ?? 0)) : [];
 
   const byRole = new Map<string, typeof templates>();
   for (const t of templates) {

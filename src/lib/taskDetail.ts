@@ -75,49 +75,49 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   activitySnap.docs.splice(30);
 
   // Batch fetch comment authors
-  const commentAuthorIds = commentsSnap.docs.map(c => c.data().authorId).filter(Boolean) as string[];
+  const commentAuthorIds = commentsSnap.docs ? commentsSnap.docs.map((c: any) => c.data().authorId).filter(Boolean) as string[] : [];
   const commentAuthorsMap = await batchFetchByIds('Employee', commentAuthorIds, adminDb);
   
-  const comments = commentsSnap.docs.map((c) => {
+  const comments = commentsSnap.docs ? commentsSnap.docs.map((c) => {
     const d = c.data();
     const author = commentAuthorsMap.get(d.authorId) as any;
     return { id: c.id, body: d.body, createdAt: toISOSafe(d.createdAt), author: { name: author?.name ?? "", avatarUrl: author?.avatarUrl ?? null } };
-  });
+  }) : [];
 
   // Batch fetch watcher employee data
-  const watcherEmployeeIds = watchersSnap.docs.map(w => w.data().employeeId).filter(Boolean) as string[];
+  const watcherEmployeeIds = watchersSnap.docs ? watchersSnap.docs.map((w: any) => w.data().employeeId).filter(Boolean) as string[] : [];
   const watcherEmployeesMap = await batchFetchByIds('Employee', watcherEmployeeIds, adminDb);
   
-  const watchers = watchersSnap.docs.map((w) => {
+  const watchers = watchersSnap.docs ? watchersSnap.docs.map((w) => {
     const d = w.data();
     const emp = watcherEmployeesMap.get(d.employeeId) as any;
     return { id: w.id, employee: { id: d.employeeId, name: emp?.name ?? "", avatarUrl: emp?.avatarUrl ?? null } };
-  });
+  }) : [];
 
   // Batch fetch checklist doneBy
-  const checklistDoneByIds = checklistSnap.docs.map(c => c.data().doneById).filter(Boolean) as string[];
+  const checklistDoneByIds = checklistSnap.docs ? checklistSnap.docs.map((c: any) => c.data().doneById).filter(Boolean) as string[] : [];
   const checklistDoneByMap = await batchFetchByIds('Employee', checklistDoneByIds, adminDb);
   
-  const checklistItems = checklistSnap.docs.map((c) => {
+  const checklistItems = checklistSnap.docs ? checklistSnap.docs.map((c) => {
     const d = c.data();
     const doneBy = d.doneById ? (checklistDoneByMap.get(d.doneById) as any) : null;
     const doneByName = doneBy?.name ?? null;
     return { id: c.id, text: d.text, done: d.done, doneByName };
-  });
+  }) : [];
 
   // Batch fetch activity actors
-  const activityActorIds = activitySnap.docs.map(a => a.data().actorId).filter(Boolean) as string[];
+  const activityActorIds = activitySnap.docs ? activitySnap.docs.map((a: any) => a.data().actorId).filter(Boolean) as string[] : [];
   const activityActorsMap = await batchFetchByIds('Employee', activityActorIds, adminDb);
   
-  const activity = activitySnap.docs.map((a) => {
+  const activity = activitySnap.docs ? activitySnap.docs.map((a) => {
     const d = a.data();
     const actor = d.actorId ? (activityActorsMap.get(d.actorId) as any) : null;
     return { id: a.id, action: d.action, detail: d.detail, createdAt: toISOSafe(d.createdAt), actor: actor ? { name: actor.name, avatarUrl: actor.avatarUrl ?? null } : null };
-  });
+  }) : [];
 
   const quad = priorityQuadrant(task.urgent, task.important);
   const priorityMeta = PRIORITY_META[quad];
-  const isWatching = watchers.some((w) => w.employee.id === viewer.id);
+  const isWatching = watchers.some((w: any) => w.employee.id === viewer.id);
   const canDelete = task.creatorId === viewer.id || task.assigneeId === viewer.id || isManagerLike(viewer.systemRole);
 
   const creatorData = creatorDoc?.exists ? creatorDoc.data() : null;
@@ -159,8 +159,8 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     canEdit: canDelete,
     kpiOptions,
     checklistItems,
-    reminders: remindersSnap.docs.map((r) => ({ id: r.id, remindAt: toISOSafe(r.data().remindAt), sent: r.data().sent })),
-    attachments: attachmentsSnap.docs.map((a) => ({ id: a.id, kind: a.data().kind, url: a.data().url, filename: a.data().filename })),
+    reminders: remindersSnap.docs ? remindersSnap.docs.map((r) => ({ id: r.id, remindAt: toISOSafe(r.data().remindAt), sent: r.data().sent })) : [],
+    attachments: attachmentsSnap.docs ? attachmentsSnap.docs.map((a) => ({ id: a.id, kind: a.data().kind, url: a.data().url, filename: a.data().filename })) : [],
     comments,
     activity,
   };

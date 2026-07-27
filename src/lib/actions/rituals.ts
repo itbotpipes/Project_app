@@ -19,7 +19,7 @@ export async function markMorningPlanned() {
     .where("assigneeId", "==", user.id)
     .where("status", "!=", "CLOSED")
     .get();
-  const plannedTaskIds = JSON.stringify(openSnap.docs.map((d) => d.id));
+  const plannedTaskIds = JSON.stringify(openSnap.docs ? openSnap.docs.map((d) => d.id) : []);
 
   const existSnap = await adminDb.collection("DailyRitual")
     .where("employeeId", "==", user.id)

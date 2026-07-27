@@ -37,7 +37,7 @@ export default async function PeoplePage() {
   
   // Group scorecards by employee
   const scorecardsByEmployee = new Map<string, any[]>();
-  scorecardsSnap.docs.forEach(doc => {
+  scorecardsSnap.docs?.forEach((doc: any) => {
     const empId = doc.data().employeeId;
     if (!scorecardsByEmployee.has(empId)) scorecardsByEmployee.set(empId, []);
     scorecardsByEmployee.get(empId)!.push(doc.data());

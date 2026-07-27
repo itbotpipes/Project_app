@@ -57,14 +57,14 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
   const employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
   if (employeesSnap.empty) return 0;
 
-  const employees = employeesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  const employees = employeesSnap.docs ? employeesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[] : [];
   const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
 
   const kpisByRole = new Map<string, any[]>();
   await Promise.all(
     roleIds.map(async (roleId) => {
       const snap = await adminDb.collection("KpiTemplate").where("roleId", "==", roleId).get();
-      kpisByRole.set(roleId, snap.docs.map((d) => ({ id: d.id, ...d.data() })));
+      kpisByRole.set(roleId, snap.docs ? snap.docs.map((d) => ({ id: d.id, ...d.data() })) : []);
     })
   );
 

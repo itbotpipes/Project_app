@@ -30,16 +30,16 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
 
   // Filter in JS — no composite index needed
   const weekStartMs = weekStart.getTime();
-  const filteredClosedTasks = closedTasksSnap.docs.filter((doc) => {
+  const filteredClosedTasks = closedTasksSnap.docs ? closedTasksSnap.docs.filter((doc) => {
     const completedAt = toDate(doc.data().completedAt);
     return completedAt && completedAt.getTime() >= weekStartMs;
-  });
+  }) : [];
 
   // Only count KPIs that have weightage > 0
-  const weightedKpis = kpiTemplatesSnap.docs.filter((d) => (d.data().weightage ?? 0) > 0);
+  const weightedKpis = kpiTemplatesSnap.docs ? kpiTemplatesSnap.docs.filter((d) => (d.data().weightage ?? 0) > 0) : [];
 
   // Resolve roles for each employee
-  const roleIds = [...new Set(employeesSnap.docs.map((d) => d.data().roleId).filter(Boolean))];
+  const roleIds = [...new Set(employeesSnap.docs ? employeesSnap.docs.map((d) => d.data().roleId).filter(Boolean) : [])];
   const roleMap = new Map<string, any>();
   await Promise.all(
     roleIds.map(async (roleId) => {
@@ -62,7 +62,7 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
     byEmp.set(t.assigneeId, arr);
   }
 
-  const rows: WeeklyStarRow[] = employeesSnap.docs.map((e) => {
+  const rows: WeeklyStarRow[] = employeesSnap.docs ? employeesSnap.docs.map((e) => {
     const emp = e.data();
     const role = roleMap.get(emp.roleId);
     const tasks = byEmp.get(e.id) ?? [];
@@ -90,7 +90,7 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
       bucketsTotal,
       index,
     };
-  });
+  }) : [];
 
   return rows.filter((r) => r.closed > 0).sort((a, b) => b.index - a.index);
 }

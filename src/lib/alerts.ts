@@ -90,7 +90,7 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
 
   if (isManagerLike(user.systemRole)) {
     const reportSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
-    const reportIds = reportSnap.docs.map((d) => d.id);
+    const reportIds = reportSnap.docs ? reportSnap.docs.map((d) => d.id) : [];
 
     if (reportIds.length) {
       const teamOverdueIds = new Set<string>();
@@ -146,7 +146,7 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
     const pm = prevStart.getMonth() + 1;
     const monthName = prevStart.toLocaleDateString("en-IN", { month: "long" });
     const activeSnap = await adminDb.collection("Employee").where("active", "==", true).get();
-    const activeIds = activeSnap.docs.map((d) => d.id);
+    const activeIds = activeSnap.docs ? activeSnap.docs.map((d) => d.id) : [];
     const cards = await Promise.all(
       activeIds.map((id) =>
         adminDb.collection("MonthlyScorecard").where("employeeId", "==", id).where("year", "==", py).where("month", "==", pm).limit(1).get()

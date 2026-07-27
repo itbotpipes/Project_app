@@ -75,9 +75,9 @@ export default async function GroupDetailPage({
     memberEmployees.some((m) => m.id === user.id && m.role === "ADMIN");
 
   // Resolve task details - batch fetch
-  const taskIds = tasksSnap.docs.map(d => d.id);
-  const assigneeIds = tasksSnap.docs.map(d => d.data().assigneeId).filter(Boolean) as string[];
-  const kpiIds = tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[];
+  const taskIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.id) : [];
+  const assigneeIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().assigneeId).filter(Boolean) as string[] : [];
+  const kpiIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[] : [];
   
   const [assigneesMap, kpisMap, checklistsSnap] = await Promise.all([
     batchFetchByIds('Employee', assigneeIds, adminDb),
@@ -87,13 +87,13 @@ export default async function GroupDetailPage({
   
   // Group checklist items by task
   const checklistsByTask = new Map<string, any[]>();
-  checklistsSnap.docs.forEach(c => {
+  checklistsSnap.docs?.forEach((c: any) => {
     const taskId = c.data().taskId;
     if (!checklistsByTask.has(taskId)) checklistsByTask.set(taskId, []);
     checklistsByTask.get(taskId)!.push({ done: c.data().done });
   });
   
-  const tasks = tasksSnap.docs.map((doc) => {
+  const tasks = tasksSnap.docs ? tasksSnap.docs.map((doc) => {
     const t = doc.data() as any;
     const assignee = t.assigneeId ? (assigneesMap.get(t.assigneeId) as any) : null;
     const kpi = t.kpiTemplateId ? (kpisMap.get(t.kpiTemplateId) as any) : null;
@@ -111,15 +111,15 @@ export default async function GroupDetailPage({
       checklistItems,
       assignee: assignee ? { id: t.assigneeId, name: assignee.name } : { id: t.assigneeId, name: "Unknown" },
     };
-  });
+  }) : [];
 
   // Sort in JS — no composite index needed
-  const kpiOptions = kpiOptionsSnap.docs
+  const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
     .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }));
-  const allPeople = allPeopleSnap.docs
+    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName })) : [];
+  const allPeople = allPeopleSnap.docs ? allPeopleSnap.docs
     .map((d) => ({ id: d.id, name: d.data().name }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => a.name.localeCompare(b.name)) : [];
   const memberPeople = memberEmployees.map((m) => ({ id: m.id, name: m.name }));
   const templates = await loadTemplateOptions();
 
