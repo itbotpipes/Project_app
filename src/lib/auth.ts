@@ -49,6 +49,7 @@ async function getSessionEmployeeId(): Promise<string | null> {
 }
 
 import { adminDb } from "./firebase/admin";
+import { fetchAllRoles, fetchAllDepartments } from "./cache";
 
 export type CurrentUser = any; // Will be properly typed when we rewrite the Employee model
 
@@ -75,8 +76,10 @@ export async function getCurrentUser() {
   // Note: Resolving relations manually since Firestore is NoSQL
   let roleData: any = null;
   if (serializedUser.roleId) {
-    const roleDoc = await adminDb.collection("Role").doc(serializedUser.roleId).get();
-    if (roleDoc.exists) {
+    const rolesSnap = await fetchAllRoles(adminDb);
+    const roleDoc = rolesSnap.docs?.find((d: any) => d.id === serializedUser.roleId);
+    
+    if (roleDoc) {
       const rawRoleData = roleDoc.data();
       // Convert role data timestamps
       roleData = {};
@@ -88,8 +91,9 @@ export async function getCurrentUser() {
         }
       }
       if (roleData && roleData.departmentId) {
-        const deptDoc = await adminDb.collection("Department").doc(roleData.departmentId).get();
-        if (deptDoc.exists) {
+        const deptsSnap = await fetchAllDepartments(adminDb);
+        const deptDoc = deptsSnap.docs?.find((d: any) => d.id === roleData.departmentId);
+        if (deptDoc) {
           const rawDeptData = deptDoc.data();
           // Convert department data timestamps
           const deptData: any = {};

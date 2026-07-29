@@ -95,26 +95,38 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
 
     if (reportIds.length) {
       const teamOverdueIds = new Set<string>();
-      for (const id of reportIds) {
-        const tSnap = await adminDb.collection("Task")
-          .where("assigneeId", "==", id)
-          .where("status", "!=", "CLOSED")
-          .limit(10)
-          .get();
-        if (tSnap.docs.some(d => d.data().dueAt && d.data().dueAt.toDate() < now)) teamOverdueIds.add(id);
+      const teamStaleIds = new Set<string>();
+      
+      const chunks: string[][] = [];
+      for (let i = 0; i < reportIds.length; i += 30) {
+        chunks.push(reportIds.slice(i, i + 30));
       }
+      
+      const teamTasksSnaps = await Promise.all(chunks.map(chunk => 
+        adminDb.collection("Task")
+          .where("assigneeId", "in", chunk)
+          .where("status", "!=", "CLOSED")
+          .get()
+      ));
+
+      teamTasksSnaps.forEach(snap => {
+        snap.docs.forEach(d => {
+          const data = d.data();
+          const assigneeId = data.assigneeId;
+          
+          if (data.dueAt && data.dueAt.toDate() < now) {
+            teamOverdueIds.add(assigneeId);
+          }
+          
+          if (data.status === "ON_HOLD" && data.updatedAt && data.updatedAt.toDate() < new Date(now.getTime() - 96 * HOUR)) {
+            teamStaleIds.add(assigneeId);
+          }
+        });
+      });
+
       if (teamOverdueIds.size > 0)
         alerts.push({ id: "team-overdue", tone: "amber", href: "/team", text: `${teamOverdueIds.size} of your team have overdue tasks` });
 
-      const teamStaleIds = new Set<string>();
-      for (const id of reportIds) {
-        const tSnap = await adminDb.collection("Task")
-          .where("assigneeId", "==", id)
-          .where("status", "==", "ON_HOLD")
-          .limit(10)
-          .get();
-        if (tSnap.docs.some(d => d.data().updatedAt && d.data().updatedAt.toDate() < new Date(now.getTime() - 96 * HOUR))) teamStaleIds.add(id);
-      }
       if (teamStaleIds.size > 0)
         alerts.push({ id: "team-stale-hold", tone: "red", href: "/team", text: `⚠ ${teamStaleIds.size} team member(s) have tasks on hold 96h+ — escalated to you` });
 

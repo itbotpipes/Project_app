@@ -28,8 +28,25 @@ export default async function Dashboard() {
   const manager = isManagerLike(user.systemRole);
   const scorer = canScoreCompanyWide(user);
 
+  const todayEnd = endOfToday();
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
+  const [
+    myCardsSnap,
+    openTasksSnap,
+    ritualSnap,
+    closedTasksSnap,
+    taskAnalysis,
+  ] = await Promise.all([
+    adminDb.collection("MonthlyScorecard").where("employeeId", "==", user.id).get(),
+    adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "!=", "CLOSED").get(),
+    adminDb.collection("DailyRitual").where("employeeId", "==", user.id).where("date", "==", todayStart).get(),
+    adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get(),
+    loadDailyTaskAnalysis(user.id),
+  ]);
+
   // My monthly scorecards
-  const myCardsSnap = await adminDb.collection("MonthlyScorecard").where("employeeId", "==", user.id).get();
   const myCards = myCardsSnap.docs
     .map(d => ({ id: d.id, ...d.data() } as any))
     .sort((a, b) => (a.year - b.year) || (a.month - b.month));
@@ -45,11 +62,6 @@ export default async function Dashboard() {
   const band = incrementBand(avg);
 
   // Tasks
-  const todayEnd = endOfToday();
-  const openTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "!=", "CLOSED").get();
-  // Ensure we don't count deleted tasks if we still have a soft delete concept, 
-  // but let's assume deleted tasks have status 'CLOSED' or are filtered out.
-  // wait, our query earlier had deletedAt == null. Let's filter in memory for deletedAt.
   const activeOpenTasks = openTasksSnap.docs.filter(d => !d.data().deletedAt);
   const openTasks = activeOpenTasks.length;
   
@@ -60,26 +72,18 @@ export default async function Dashboard() {
   }
 
   // Daily ritual state
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
-  const ritualSnap = await adminDb.collection("DailyRitual").where("employeeId", "==", user.id).where("date", "==", todayStart).get();
   const ritual = ritualSnap.empty ? null : (ritualSnap.docs[0].data() as any);
 
   // Plan adherence
-  const closedTodayTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get();
-  const closedTodayTasks = closedTodayTasksSnap.docs.filter(d => {
+  const closedTodayTasks = closedTasksSnap.docs.filter(d => {
     const cAt = toDate(d.data().completedAt);
     return cAt && cAt.getTime() >= todayStart.getTime() && !d.data().deletedAt;
   }).map(d => ({ id: d.id }));
   
   const adherence = computeAdherence(ritual?.plannedTaskIds ?? null, closedTodayTasks.map((t) => t.id));
 
-  // Detailed daily task analysis
-  const taskAnalysis = await loadDailyTaskAnalysis(user.id);
-
   // Streak & badges
-  const completedSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get();
-  const completedDates = completedSnap.docs ? completedSnap.docs.map((d: any) => toDate(d.data().completedAt)).filter(Boolean) as Date[] : [];
+  const completedDates = closedTasksSnap.docs ? closedTasksSnap.docs.map((d: any) => toDate(d.data().completedAt)).filter(Boolean) as Date[] : [];
   const streak = computeStreak(completedDates);
   const badges = streakBadges(streak);
   
