@@ -31,11 +31,22 @@ export default async function LeaderboardPage({
   const ly = lastMonthStart.getFullYear();
   const lm = lastMonthStart.getMonth() + 1;
 
-  // Employee of last month — fetch all for that month, sort in JS
-  const lastMonthAllSnap = await adminDb.collection("MonthlyScorecard")
-    .where("year", "==", ly)
-    .where("month", "==", lm)
-    .get();
+  const sp = await searchParams;
+  const periodStart = sp.date ? monthStartOf(new Date(sp.date)) : previousMonthStart();
+  const periodEnd = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 1);
+  const monthLabelStr = periodStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
+  const monthValue = `${periodStart.getFullYear()}-${String(periodStart.getMonth() + 1).padStart(2, "0")}`;
+  const py = periodStart.getFullYear();
+  const pm = periodStart.getMonth() + 1;
+
+  const [lastMonthAllSnap, employeesSnap] = await Promise.all([
+    adminDb.collection("MonthlyScorecard")
+      .where("year", "==", ly)
+      .where("month", "==", lm)
+      .get(),
+    adminDb.collection("Employee").where("active", "==", true).get()
+  ]);
+
   let lastMonthTop: any = null;
   if (!lastMonthAllSnap.empty) {
     const sorted = lastMonthAllSnap.docs
@@ -43,8 +54,8 @@ export default async function LeaderboardPage({
       .sort((a, b) => b.data().total - a.data().total);
     if (sorted.length > 0) {
       const card = sorted[0].data();
-      const empDoc = await adminDb.collection("Employee").doc(card.employeeId).get();
-      if (empDoc.exists) {
+      const empDoc = employeesSnap.docs?.find(d => d.id === card.employeeId);
+      if (empDoc) {
         const emp = empDoc.data()!;
         let roleData: any = null;
         if (emp.roleId) {
@@ -56,15 +67,6 @@ export default async function LeaderboardPage({
     }
   }
 
-  const sp = await searchParams;
-  const periodStart = sp.date ? monthStartOf(new Date(sp.date)) : previousMonthStart();
-  const periodEnd = new Date(periodStart.getFullYear(), periodStart.getMonth() + 1, 1);
-  const monthLabelStr = periodStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
-  const monthValue = `${periodStart.getFullYear()}-${String(periodStart.getMonth() + 1).padStart(2, "0")}`;
-  const py = periodStart.getFullYear();
-  const pm = periodStart.getMonth() + 1;
-
-  const employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
   const empIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.id) : [];
   const roleIds = employeesSnap.docs ? employeesSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];
 

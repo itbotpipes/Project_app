@@ -12,6 +12,16 @@ export default async function PerformancePage() {
   if (!user) return null;
   const manager = isManagerLike(user.systemRole);
 
+  const [
+    performanceData,
+    allScorecardsSnap,
+    reportsSnap
+  ] = await Promise.all([
+    loadEmployeePerformance(user.id),
+    adminDb.collection("MonthlyScorecard").get(),
+    manager ? adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get() : Promise.resolve(null)
+  ]);
+
   const {
     trend,
     latestFinal,
@@ -26,18 +36,15 @@ export default async function PerformancePage() {
     history,
     bucketData,
     bucketFillData,
-  } = await loadEmployeePerformance(user.id);
+  } = performanceData;
 
   // Team scores (managers) — latest period
-  // Team scores (managers) — latest period
-  const allScorecardsSnap = await adminDb.collection("MonthlyScorecard").get();
   const allScoresDocs = allScorecardsSnap.docs.sort((a, b) => (b.data().year - a.data().year) || (b.data().month - a.data().month));
   const latestPeriodSnap = { empty: allScoresDocs.length === 0, docs: allScoresDocs.slice(0, 1) };
   const latestPeriod = latestPeriodSnap.empty ? null : latestPeriodSnap.docs[0].data();
   
   let reports: any[] = [];
-  if (manager) {
-    const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
+  if (manager && reportsSnap) {
     
     // Batch fetch roles and scorecards for all reports
     const reportIds = reportsSnap.docs ? reportsSnap.docs.map((d: any) => d.id) : [];

@@ -28,9 +28,12 @@ export default async function BoardPage({
   const sp = await searchParams;
   const period = sp.period === "week" ? "week" : sp.period === "month" ? "month" : "today";
 
-  const [tasksSnap, kpiOptionsSnap] = await Promise.all([
+  const [tasksSnap, kpiOptionsSnap, allUserTasksSnap, assignableSnap, templates] = await Promise.all([
     adminDb.collection("Task").where("assigneeId", "==", user.id).where("deletedAt", "==", null).get(),
     adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
+    adminDb.collection("Task").where("assigneeId", "==", user.id).get(),
+    isManagerLike(user.systemRole) ? cachedFetch('active-employees', () => adminDb.collection("Employee").where("active", "==", true).get(), 300) : Promise.resolve({ docs: [] }),
+    loadTemplateOptions()
   ]);
 
   const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
@@ -91,8 +94,6 @@ export default async function BoardPage({
   // KPI bucket-balance check (this month) — single fetch, filter in JS
   const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
   const startOfMonthMs = startOfMonth.getTime();
-  // Fetch all user tasks for date-based stats (separate from the board tasks which exclude deleted)
-  const allUserTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", user.id).get();
   const allUserTasks = allUserTasksSnap.docs || [];
 
   const workedBuckets = new Set(
@@ -135,17 +136,10 @@ export default async function BoardPage({
     todaysCounts[kpiId] = (todaysCounts[kpiId] ?? 0) + 1;
   }
 
-  const assignable = isManagerLike(user.systemRole)
-    ? (await cachedFetch(
-        'active-employees',
-        () => adminDb.collection("Employee").where("active", "==", true).get(),
-        300 // cache for 5 minutes
-      )).docs?.map((d) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
-        .sort((a, b) => a.name.localeCompare(b.name))
-        .filter((e) => e.id !== user.id) || []
-    : [];
+  const assignable = assignableSnap.docs?.map((d: any) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
+        .sort((a: any, b: any) => a.name.localeCompare(b.name))
+        .filter((e: any) => e.id !== user.id) || [];
   const people = [{ id: user.id, name: `${user.name} (me)`, roleId: user.roleId }, ...assignable];
-  const templates = await loadTemplateOptions();
 
   const boardTasks = tasks ? tasks.map((t) => ({
     id: t.id,

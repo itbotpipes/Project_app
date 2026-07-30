@@ -80,12 +80,12 @@ export default async function ScoresPage({
 
   const kpiTemplates: any[] = [];
   if (roleIds.length > 0) {
-    for (const chunk of chunkIds(roleIds)) {
-      if (chunk.length > 0) {
-        const snap = await adminDb.collection("KpiTemplate").where("roleId", "in", chunk).get();
-        snap.docs?.forEach((d: any) => kpiTemplates.push({ id: d.id, ...d.data() }));
-      }
-    }
+    const kpiSnaps = await Promise.all(
+      chunkIds(roleIds).filter(c => c.length > 0).map(chunk => 
+        adminDb.collection("KpiTemplate").where("roleId", "in", chunk).get()
+      )
+    );
+    kpiSnaps.forEach(snap => snap.docs?.forEach((d: any) => kpiTemplates.push({ id: d.id, ...d.data() })));
   }
   kpiTemplates.sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
 
@@ -94,34 +94,38 @@ export default async function ScoresPage({
   const reviews: any[] = [];
   const behaviourReviews: any[] = [];
 
-  for (const chunk of chunkIds(empIds)) {
-    if (chunk.length > 0) {
-      const [scoresSnap, tasksSnap, reviewsSnap, behaviourSnap] = await Promise.all([
-        adminDb.collection("MonthlyScore").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
-        adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
-        adminDb.collection("YearlyReview").where("employeeId", "in", chunk).where("year", "==", year).get(),
-        adminDb.collection("BehaviourReview").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
-      ]);
-      const periodStartMs = periodStart.getTime();
-      const monthEndMs = monthEnd.getTime();
-      scoresSnap.docs?.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
-      tasksSnap.docs?.forEach((d: any) => {
-        const t = d.data();
-        const raw = t.createdAt;
-        const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-        if (createdAt.getTime() < periodStartMs || createdAt.getTime() >= monthEndMs) return;
-        tasks.push({
-          assigneeId: t.assigneeId,
-          kpiTemplateId: t.kpiTemplateId,
-          status: t.status,
-          createdAt,
-          completedAt: t.completedAt ? (t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
-          carryCount: t.carryCount ?? 0,
-        });
+  const employeeChunkQueries = chunkIds(empIds).filter(c => c.length > 0).map(async (chunk) => {
+    return Promise.all([
+      adminDb.collection("MonthlyScore").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
+      adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
+      adminDb.collection("YearlyReview").where("employeeId", "in", chunk).where("year", "==", year).get(),
+      adminDb.collection("BehaviourReview").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
+    ]);
+  });
+  
+  const employeeChunkResults = await Promise.all(employeeChunkQueries);
+  
+  const periodStartMs = periodStart.getTime();
+  const monthEndMs = monthEnd.getTime();
+  
+  for (const [scoresSnap, tasksSnap, reviewsSnap, behaviourSnap] of employeeChunkResults) {
+    scoresSnap.docs?.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
+    tasksSnap.docs?.forEach((d: any) => {
+      const t = d.data();
+      const raw = t.createdAt;
+      const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+      if (createdAt.getTime() < periodStartMs || createdAt.getTime() >= monthEndMs) return;
+      tasks.push({
+        assigneeId: t.assigneeId,
+        kpiTemplateId: t.kpiTemplateId,
+        status: t.status,
+        createdAt,
+        completedAt: t.completedAt ? (t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
+        carryCount: t.carryCount ?? 0,
       });
-      reviewsSnap.docs?.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
-      behaviourSnap.docs?.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
-    }
+    });
+    reviewsSnap.docs?.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
+    behaviourSnap.docs?.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
   }
 
   const kpisByRole = new Map<string, typeof kpiTemplates>();
