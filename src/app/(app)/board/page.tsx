@@ -36,7 +36,6 @@ export default async function BoardPage({
     adminDb.collection("Task")
       .where("assigneeId", "==", user.id)
       .where("status", "!=", "CLOSED")
-      .where("deletedAt", "==", null)
       .get(),
     adminDb.collection("Task")
       .where("assigneeId", "==", user.id)
@@ -58,7 +57,7 @@ export default async function BoardPage({
   // Active board tasks from the open/active tasks snap.
   // We can also merge recently closed tasks from monthTasksSnap if we want them on the board,
   // but usually active tasks (non-CLOSED) are what's displayed. Let's combine them:
-  const activeBoardDocs = activeTasksSnap.docs || [];
+  const activeBoardDocs = activeTasksSnap.docs ? activeTasksSnap.docs.filter(d => !d.data().deletedAt) : [];
   // Include recently completed tasks from this month to show on board if needed, or filter.
   // The Kanban board expects to render tasks in different columns, including CLOSED.
   // To populate the CLOSED column without downloading full history, we filter this month's closed tasks.

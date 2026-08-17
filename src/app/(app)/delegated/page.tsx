@@ -34,7 +34,6 @@ export default async function DelegatedTasksPage() {
   const [delegatedSnap, assignableSnap, kpiOptionsSnap] = await Promise.all([
     adminDb.collection("Task")
       .where("creatorId", "==", user.id)
-      .where("deletedAt", "==", null)
       .get(),
     cachedFetch(
       'active-employees',
@@ -44,8 +43,10 @@ export default async function DelegatedTasksPage() {
     fetchKpiTemplatesByRole(user.roleId, adminDb),
   ]);
 
-  // Filter out self-assigned
-  const delegatedDocs = delegatedSnap.docs ? delegatedSnap.docs.filter((d) => d.data().assigneeId !== user.id) : [];
+  // Filter out self-assigned and deleted tasks
+  const delegatedDocs = delegatedSnap.docs
+    ? delegatedSnap.docs.filter((d) => d.data().assigneeId !== user.id && !d.data().deletedAt)
+    : [];
 
   // Batch fetch assignees and KPI templates
   const assigneeIds = delegatedDocs.map((d: any) => d.data().assigneeId).filter(Boolean) as string[];

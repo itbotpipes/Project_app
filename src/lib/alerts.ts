@@ -33,7 +33,6 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
     adminDb.collection("Task")
       .where("assigneeId", "==", user.id)
       .where("status", "!=", "CLOSED")
-      .where("deletedAt", "==", null)
       .get(),
     adminDb.collection("Task")
       .where("assigneeId", "==", user.id)
@@ -63,7 +62,7 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
   // ── Overdue tasks ─────────────────────────────────────────────────────────
   const overdueTasks = activeTasksSnap.docs.filter(d => {
     const data = d.data();
-    return data.dueAt && toDate(data.dueAt) < now;
+    return !data.deletedAt && data.dueAt && toDate(data.dueAt) < now;
   });
   if (overdueTasks.length > 0)
     alerts.push({ id: "overdue", tone: "red", href: "/board", text: `${overdueTasks.length} of your tasks are overdue` });
@@ -104,7 +103,7 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
   // ── Stale on-hold tasks (48h+) ────────────────────────────────────────────
   const staleOnHold = activeTasksSnap.docs.filter(d => {
     const data = d.data();
-    return data.status === "ON_HOLD" && data.updatedAt && toDate(data.updatedAt) < new Date(now.getTime() - 48 * HOUR);
+    return !data.deletedAt && data.status === "ON_HOLD" && data.updatedAt && toDate(data.updatedAt) < new Date(now.getTime() - 48 * HOUR);
   });
   if (staleOnHold.length > 0)
     alerts.push({ id: "stale-hold", tone: "red", href: "/board", text: `${staleOnHold.length} task(s) on hold for 48h+ — update the status` });
