@@ -53,7 +53,7 @@ export default async function OrgChartPage({
       name: e.name,
       roleTitle: e.role.title,
       avatarUrl: e.avatarUrl,
-      directs: (byManager.get(e.id) ?? []).map(buildTree),
+      children: (byManager.get(e.id) ?? []).map(buildTree),
     };
   }
 
