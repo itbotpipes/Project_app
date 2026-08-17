@@ -6,7 +6,6 @@ import { mondayOf } from "@/lib/date";
 import { cn } from "@/lib/cn";
 import { Card, SectionTitle } from "../_components/ui";
 import BucketFill from "../_components/BucketFill";
-import AutoRefresh from "../_components/AutoRefresh";
 import NewTaskDialog from "./NewTaskDialog";
 import KanbanBoard from "./KanbanBoard";
 import { loadTemplateOptions } from "@/lib/templates";
@@ -28,47 +27,79 @@ export default async function BoardPage({
   const sp = await searchParams;
   const period = sp.period === "week" ? "week" : sp.period === "month" ? "month" : "today";
 
-  const [tasksSnap, kpiOptionsSnap, allUserTasksSnap, assignableSnap, templates] = await Promise.all([
-    adminDb.collection("Task").where("assigneeId", "==", user.id).where("deletedAt", "==", null).get(),
+  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+
+  // Split board task queries to avoid full task history downloads.
+  // 1. Active Board Tasks (excluding closed unless they are recent or relevant for the board layout).
+  // 2. Month-bounded Tasks for KPI bucket statistics.
+  const [activeTasksSnap, monthTasksSnap, kpiOptionsSnap, assignableSnap, templates] = await Promise.all([
+    adminDb.collection("Task")
+      .where("assigneeId", "==", user.id)
+      .where("status", "!=", "CLOSED")
+      .where("deletedAt", "==", null)
+      .get(),
+    adminDb.collection("Task")
+      .where("assigneeId", "==", user.id)
+      .where("createdAt", ">=", startOfMonth)
+      .get(),
     adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
-    adminDb.collection("Task").where("assigneeId", "==", user.id).get(),
-    isManagerLike(user.systemRole) ? cachedFetch('active-employees', () => adminDb.collection("Employee").where("active", "==", true).get(), 300) : Promise.resolve({ docs: [] }),
-    loadTemplateOptions()
+    isManagerLike(user.systemRole)
+      ? cachedFetch("active-employees", () => adminDb.collection("Employee").where("active", "==", true).get(), 300)
+      : Promise.resolve({ docs: [] }),
+    loadTemplateOptions(),
   ]);
 
-  const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
-    .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName })) : [];
+  const kpiOptions = kpiOptionsSnap.docs
+    ? kpiOptionsSnap.docs
+        .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
+        .map(d => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }))
+    : [];
 
-  // Fetch related data for tasks - optimized with batch queries
-  const taskIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.id) : [];
-  const kpiIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[] : [];
-  const projectIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().projectId).filter(Boolean) as string[] : [];
-  const creatorIds = tasksSnap.docs ? tasksSnap.docs.map(d => d.data().creatorId).filter(Boolean) as string[] : [];
-  
-  // Batch fetch all related data
-  const [kpisMap, projectsMap, creatorsMap, checklistsSnap] = await Promise.all([
-    batchFetchByIds('KpiTemplate', kpiIds, adminDb),
-    batchFetchByIds('Project', projectIds, adminDb),
-    batchFetchByIds('Employee', creatorIds, adminDb),
-    taskIds.length > 0 ? adminDb.collection("ChecklistItem").where("taskId", "in", taskIds).get() : Promise.resolve({ docs: [] } as any),
+  // Active board tasks from the open/active tasks snap.
+  // We can also merge recently closed tasks from monthTasksSnap if we want them on the board,
+  // but usually active tasks (non-CLOSED) are what's displayed. Let's combine them:
+  const activeBoardDocs = activeTasksSnap.docs || [];
+  // Include recently completed tasks from this month to show on board if needed, or filter.
+  // The Kanban board expects to render tasks in different columns, including CLOSED.
+  // To populate the CLOSED column without downloading full history, we filter this month's closed tasks.
+  const recentlyClosedDocs = monthTasksSnap.docs ? monthTasksSnap.docs.filter(d => d.data().status === "CLOSED" && !d.data().deletedAt) : [];
+  const boardDocs = [...activeBoardDocs, ...recentlyClosedDocs];
+
+  // Fetch related data for board tasks — batch queries, no N+1
+  const taskIds = boardDocs.map(d => d.id);
+  const kpiIds = boardDocs.map(d => d.data().kpiTemplateId).filter(Boolean) as string[];
+  const projectIds = boardDocs.map(d => d.data().projectId).filter(Boolean) as string[];
+  const creatorIds = boardDocs.map(d => d.data().creatorId).filter(Boolean) as string[];
+
+  // All related-data fetches run in parallel — no inter-dependencies
+  const checklistChunks: string[][] = [];
+  for (let i = 0; i < taskIds.length; i += 30) checklistChunks.push(taskIds.slice(i, i + 30));
+
+  const [kpisMap, projectsMap, creatorsMap, ...checklistSnapChunks] = await Promise.all([
+    batchFetchByIds("KpiTemplate", kpiIds, adminDb),
+    batchFetchByIds("Project", projectIds, adminDb),
+    batchFetchByIds("Employee", creatorIds, adminDb),
+    ...checklistChunks.map(chunk =>
+      adminDb.collection("ChecklistItem").where("taskId", "in", chunk).get()
+    ),
   ]);
-  
+  const allChecklistDocs = (checklistSnapChunks as any[]).flatMap(snap => snap.docs ?? []);
+
+
   // Group checklist items by task
   const checklistsByTask = new Map<string, any[]>();
-  checklistsSnap.docs?.forEach((c: any) => {
+  allChecklistDocs.forEach((c: any) => {
     const taskId = c.data().taskId;
     if (!checklistsByTask.has(taskId)) checklistsByTask.set(taskId, []);
     checklistsByTask.get(taskId)!.push({ done: c.data().done });
   });
-  
-  const tasks = tasksSnap.docs ? tasksSnap.docs.map((doc) => {
+
+  const tasks = boardDocs.map(doc => {
     const t = doc.data() as any;
-    const kpi = kpiIds.includes(t.kpiTemplateId) ? kpisMap.get(t.kpiTemplateId) as any : null;
-    const project = projectIds.includes(t.projectId) ? projectsMap.get(t.projectId) as any : null;
-    const creator = creatorIds.includes(t.creatorId) ? creatorsMap.get(t.creatorId) as any : null;
+    const kpi = t.kpiTemplateId ? (kpisMap.get(t.kpiTemplateId) as any) : null;
+    const project = t.projectId ? (projectsMap.get(t.projectId) as any) : null;
+    const creator = t.creatorId ? (creatorsMap.get(t.creatorId) as any) : null;
     const checklistItems = checklistsByTask.get(doc.id) || [];
-    
     return {
       id: doc.id,
       title: t.title,
@@ -89,31 +120,30 @@ export default async function BoardPage({
       creator: creator ? { name: creator.name } : null,
       checklistItems,
     };
-  }) : [];
+  });
 
-  // KPI bucket-balance check (this month) — single fetch, filter in JS
-  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+  // KPI bucket-balance check — derived from month-bounded tasks (no full-history fetch)
+  const monthUserTasks = monthTasksSnap.docs || [];
   const startOfMonthMs = startOfMonth.getTime();
-  const allUserTasks = allUserTasksSnap.docs || [];
 
   const workedBuckets = new Set(
-    allUserTasks
-      .filter((d) => { const raw = d.data().createdAt; const t = raw?.toDate ? raw.toDate() : new Date(raw ?? 0); return t.getTime() >= startOfMonthMs; })
-      .map((d) => d.data().kpiTemplateId).filter(Boolean)
+    monthUserTasks
+      .map(d => d.data().kpiTemplateId)
+      .filter(Boolean)
   );
-  const monthCount = allUserTasks.filter((d) => { const raw = d.data().createdAt; const t = raw?.toDate ? raw.toDate() : new Date(raw ?? 0); return t.getTime() >= startOfMonthMs; }).length;
+  const monthCount = monthUserTasks.length;
   const imbalance = kpiOptions.length >= 4 && monthCount >= 3 && workedBuckets.size <= 2;
 
-  // Bucket water-fill
+  // Bucket water-fill period
   const periodStart =
     period === "today"
       ? (() => { const d = new Date(); d.setHours(0, 0, 0, 0); return d; })()
       : period === "week"
-        ? mondayOf()
-        : startOfMonth;
+      ? mondayOf()
+      : startOfMonth;
   const periodStartMs = periodStart.getTime();
   const countByKpi = new Map<string, number>();
-  for (const doc of allUserTasks) {
+  for (const doc of monthUserTasks) {
     const raw = doc.data().createdAt;
     const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
     if (createdAt.getTime() < periodStartMs) continue;
@@ -121,13 +151,14 @@ export default async function BoardPage({
     if (!kpiId) continue;
     countByKpi.set(kpiId, (countByKpi.get(kpiId) ?? 0) + 1);
   }
-  const bucketData = kpiOptions.map((k) => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
+  const bucketData = kpiOptions.map(k => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
 
+  // Today's per-KPI counts (for the new task dialog)
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
   const todayStartMs = todayStart.getTime();
   const todaysCounts: Record<string, number> = {};
-  for (const doc of allUserTasks) {
+  for (const doc of monthUserTasks) {
     const raw = doc.data().createdAt;
     const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
     if (createdAt.getTime() < todayStartMs) continue;
@@ -136,12 +167,13 @@ export default async function BoardPage({
     todaysCounts[kpiId] = (todaysCounts[kpiId] ?? 0) + 1;
   }
 
-  const assignable = assignableSnap.docs?.map((d: any) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
-        .sort((a: any, b: any) => a.name.localeCompare(b.name))
-        .filter((e: any) => e.id !== user.id) || [];
+  const assignable = assignableSnap.docs
+    ?.map((d: any) => ({ id: d.id, name: d.data().name, roleId: d.data().roleId }))
+    .sort((a: any, b: any) => a.name.localeCompare(b.name))
+    .filter((e: any) => e.id !== user.id) || [];
   const people = [{ id: user.id, name: `${user.name} (me)`, roleId: user.roleId }, ...assignable];
 
-  const boardTasks = tasks ? tasks.map((t) => ({
+  const boardTasks = tasks.map(t => ({
     id: t.id,
     title: t.title,
     status: t.status,
@@ -160,7 +192,7 @@ export default async function BoardPage({
       t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name ?? null : null,
     checklistTotal: t.checklistItems.length,
     checklistDone: t.checklistItems.filter((c: any) => c.done).length,
-  })) : [];
+  }));
 
   return (
     <div className="space-y-4">
@@ -178,9 +210,11 @@ export default async function BoardPage({
         <SectionTitle
           action={
             <div className="flex items-center gap-2 text-xs">
-              <AutoRefresh seconds={20} />
+              {/* AutoRefresh removed — was triggering router.refresh() every 20 seconds,
+                  re-running auth, alerts, and all Firestore queries for every user.
+                  The board updates automatically after any action via revalidatePath(). */}
               <div className="flex gap-1">
-                {(["today", "week", "month"] as const).map((p) => (
+                {(["today", "week", "month"] as const).map(p => (
                   <Link
                     key={p}
                     href={`/board?period=${p}`}
@@ -200,7 +234,7 @@ export default async function BoardPage({
         </SectionTitle>
         <BucketFill buckets={bucketData} />
         <p className="mt-3 text-[11px] text-slate-400">
-          Each red pipe is one of your KPIs. Water rises as work flows through it — updates live as tasks move.
+          Each red pipe is one of your KPIs. Water rises as work flows through it — updates after each action.
         </p>
       </Card>
 
@@ -213,7 +247,7 @@ export default async function BoardPage({
       )}
 
       <p className="text-xs text-slate-400">
-        💡 Drag a card between columns to change its status — or use the "Move to…" dropdown on each card.
+        💡 Drag a card between columns to change its status — or use the &quot;Move to…&quot; dropdown on each card.
       </p>
       <KanbanBoard initialTasks={boardTasks} columns={[...TASK_STATUS_ORDER]} />
     </div>

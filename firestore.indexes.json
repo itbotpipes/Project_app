@@ -67,6 +67,14 @@
       "collectionGroup": "Task",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "dueAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Task",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "assigneeId", "order": "ASCENDING" },
         { "fieldPath": "urgent", "order": "ASCENDING" },
         { "fieldPath": "important", "order": "ASCENDING" },
@@ -94,6 +102,15 @@
       "collectionGroup": "Reminder",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "sent", "order": "ASCENDING" },
+        { "fieldPath": "remindAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Reminder",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "employeeId", "order": "ASCENDING" },
         { "fieldPath": "sent", "order": "ASCENDING" },
         { "fieldPath": "remindAt", "order": "ASCENDING" }
       ]
@@ -209,6 +226,15 @@
       ]
     },
     {
+      "collectionGroup": "TaskWatcher",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "employeeId", "order": "ASCENDING" },
+        { "fieldPath": "notified", "order": "ASCENDING" },
+        { "fieldPath": "createdAt", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "AuditLog",
       "queryScope": "COLLECTION",
       "fields": [
@@ -264,13 +290,6 @@
       "fields": [
         { "fieldPath": "active", "order": "ASCENDING" },
         { "fieldPath": "reportsToId", "order": "ASCENDING" }
-      ]
-    },
-    {
-      "collectionGroup": "Department",
-      "queryScope": "COLLECTION",
-      "fields": [
-        { "fieldPath": "name", "order": "ASCENDING" }
       ]
     }
   ],

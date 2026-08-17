@@ -106,23 +106,24 @@ export default async function LeaderboardPage({
       chunks.map(async (chunk) => {
         const [sc, ta, ca] = await Promise.all([
           adminDb.collection("MonthlyScorecard").where("employeeId", "in", chunk).where("year", "==", py).where("month", "==", pm).get(),
-          adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
-          adminDb.collection("Task").where("assigneeId", "in", chunk).where("status", "==", "CLOSED").get(),
+          adminDb.collection("Task")
+            .where("assigneeId", "in", chunk)
+            .where("createdAt", ">=", periodStart)
+            .where("createdAt", "<", periodEnd)
+            .get(),
+          adminDb.collection("Task")
+            .where("assigneeId", "in", chunk)
+            .where("status", "==", "CLOSED")
+            .where("completedAt", ">=", periodStart)
+            .where("completedAt", "<", periodEnd)
+            .get(),
         ]);
-        const periodStartMs = periodStart.getTime();
-        const periodEndMs = periodEnd.getTime();
         sc.docs?.forEach((d: any) => scorecardsAll.push({ ...d.data(), id: d.id }));
         ta.docs?.forEach((d: any) => {
-          const raw = d.data().createdAt;
-          const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-          if (createdAt.getTime() >= periodStartMs && createdAt.getTime() < periodEndMs)
-            tasksAll.push({ ...d.data(), id: d.id });
+          tasksAll.push({ ...d.data(), id: d.id });
         });
         ca.docs?.forEach((d: any) => {
-          const raw = d.data().completedAt;
-          const completedAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-          if (completedAt.getTime() >= periodStartMs && completedAt.getTime() < periodEndMs)
-            closedTasksAll.push({ ...d.data(), id: d.id });
+          closedTasksAll.push({ ...d.data(), id: d.id });
         });
       })
     );

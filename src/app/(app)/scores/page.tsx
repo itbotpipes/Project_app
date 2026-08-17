@@ -97,7 +97,11 @@ export default async function ScoresPage({
   const employeeChunkQueries = chunkIds(empIds).filter(c => c.length > 0).map(async (chunk) => {
     return Promise.all([
       adminDb.collection("MonthlyScore").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
-      adminDb.collection("Task").where("assigneeId", "in", chunk).get(),
+      adminDb.collection("Task")
+        .where("assigneeId", "in", chunk)
+        .where("createdAt", ">=", periodStart)
+        .where("createdAt", "<", monthEnd)
+        .get(),
       adminDb.collection("YearlyReview").where("employeeId", "in", chunk).where("year", "==", year).get(),
       adminDb.collection("BehaviourReview").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
     ]);
@@ -105,16 +109,12 @@ export default async function ScoresPage({
   
   const employeeChunkResults = await Promise.all(employeeChunkQueries);
   
-  const periodStartMs = periodStart.getTime();
-  const monthEndMs = monthEnd.getTime();
-  
   for (const [scoresSnap, tasksSnap, reviewsSnap, behaviourSnap] of employeeChunkResults) {
     scoresSnap.docs?.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
     tasksSnap.docs?.forEach((d: any) => {
       const t = d.data();
       const raw = t.createdAt;
       const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-      if (createdAt.getTime() < periodStartMs || createdAt.getTime() >= monthEndMs) return;
       tasks.push({
         assigneeId: t.assigneeId,
         kpiTemplateId: t.kpiTemplateId,

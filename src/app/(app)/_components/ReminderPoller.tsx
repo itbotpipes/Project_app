@@ -23,6 +23,7 @@ export default function ReminderPoller() {
     let cancelled = false;
 
     async function poll() {
+      if (document.visibilityState === "hidden") return;
       try {
         const res = await fetch("/api/reminders/due", { cache: "no-store" });
         if (!res.ok) return;
@@ -44,9 +45,19 @@ export default function ReminderPoller() {
 
     poll();
     const id = setInterval(poll, POLL_MS);
+
+    // Pause/resume polling on visibilitychange
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        poll();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibilityChange);
+
     return () => {
       cancelled = true;
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
     };
   }, []);
 

@@ -6,24 +6,23 @@ import { adminDb } from "@/lib/firebase/admin";
 import { computeAutoScores } from "@/lib/autoscore";
 import { BEHAVIOUR_ASPECTS } from "@/lib/behaviour";
 
-async function canScore(raterId: string, employeeId: string) {
-  const raterDoc = await adminDb.collection("Employee").doc(raterId).get();
-  if (!raterDoc.exists) return false;
-  const rater = raterDoc.data()!;
-
-  let roleData: any = null;
-  if (rater.roleId) {
-    const roleDoc = await adminDb.collection("Role").doc(rater.roleId).get();
-    if (roleDoc.exists) roleData = roleDoc.data();
-  }
-
-  const raterWithRole = { ...rater, role: roleData };
-  if (canScoreCompanyWide(raterWithRole as any)) return true;
-  if (!isManagerLike(rater.systemRole)) return false;
-
+/**
+ * Authorization check for scoring a given employee.
+ * Accepts the full user object (from getCurrentUser) so we don't re-fetch
+ * Employee + Role on every scoring action — those were 2 extra Firestore reads.
+ */
+async function canScoreForUser(
+  user: { id: string; systemRole: string; role: { title: string } | null },
+  employeeId: string
+) {
+  // Company-wide scorers (ADMIN, CEO, HR) can always score anyone
+  if (user.role && canScoreCompanyWide(user as any)) return true;
+  // Managers can only score direct reports
+  if (!isManagerLike(user.systemRole)) return false;
   const targetDoc = await adminDb.collection("Employee").doc(employeeId).get();
-  return targetDoc.exists && targetDoc.data()!.reportsToId === raterId;
+  return targetDoc.exists && targetDoc.data()!.reportsToId === user.id;
 }
+
 
 export async function saveMonthlyScorecard(formData: FormData) {
   const user = await getCurrentUser();
@@ -33,7 +32,7 @@ export async function saveMonthlyScorecard(formData: FormData) {
   const year = Number(formData.get("year"));
   const month = Number(formData.get("month"));
   if (!employeeId || !year || !month) return { error: "Missing fields" };
-  if (!(await canScore(user.id, employeeId))) return { error: "Not authorized" };
+  if (!(await canScoreForUser(user, employeeId))) return { error: "Not authorized" };
 
   const employeeDoc = await adminDb.collection("Employee").doc(employeeId).get();
   if (!employeeDoc.exists) return { error: "No such employee" };
@@ -132,7 +131,7 @@ export async function saveYearlyReview(formData: FormData) {
   const employeeId = String(formData.get("employeeId") || "");
   const year = Number(formData.get("year"));
   if (!employeeId || !year) return { error: "Missing fields" };
-  if (!(await canScore(user.id, employeeId))) return { error: "Not authorized" };
+  if (!(await canScoreForUser(user, employeeId))) return { error: "Not authorized" };
 
   const clampPct = (v: FormDataEntryValue | null) =>
     v != null && v !== "" ? Math.max(0, Math.min(100, Number(v))) : null;
@@ -164,7 +163,7 @@ export async function saveBehaviourReview(formData: FormData) {
   const year = Number(formData.get("year"));
   const month = Number(formData.get("month"));
   if (!employeeId || !year || !month) return { error: "Missing fields" };
-  if (!(await canScore(user.id, employeeId))) return { error: "Not authorized" };
+  if (!(await canScoreForUser(user, employeeId))) return { error: "Not authorized" };
 
   const clamp10 = (v: FormDataEntryValue | null) =>
     Math.max(0, Math.min(10, Number(v ?? 0) || 0));

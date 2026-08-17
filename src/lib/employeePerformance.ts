@@ -83,11 +83,12 @@ export async function loadEmployeePerformance(employeeId: string) {
   for (const k of kpis) kraMap.set(k.kraName, (kraMap.get(k.kraName) ?? 0) + k.weightage);
   const bucketData = [...kraMap.entries()].map(([name, value]) => ({ name, value }));
 
-  const allTasksSnap = await adminDb.collection("Task").where("assigneeId", "==", employeeId).get();
+  const monthTasksSnap = await adminDb.collection("Task")
+    .where("assigneeId", "==", employeeId)
+    .where("createdAt", ">=", startOfMonth)
+    .get();
   const countByKpi = new Map<string, number>();
-  for (const doc of allTasksSnap.docs) {
-    const createdAt = doc.data().createdAt?.toDate ? doc.data().createdAt.toDate() : new Date(doc.data().createdAt ?? 0);
-    if (createdAt < startOfMonth) continue;
+  for (const doc of monthTasksSnap.docs) {
     const kpiId = doc.data().kpiTemplateId;
     if (!kpiId) continue;
     countByKpi.set(kpiId, (countByKpi.get(kpiId) ?? 0) + 1);

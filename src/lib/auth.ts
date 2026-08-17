@@ -2,6 +2,7 @@ import "server-only";
 import { cookies } from "next/headers";
 import { SignJWT, jwtVerify } from "jose";
 import bcrypt from "bcryptjs";
+import { cache } from "react";
 
 const COOKIE = "ops_session";
 const secret = new TextEncoder().encode(
@@ -53,7 +54,7 @@ import { fetchAllRoles, fetchAllDepartments } from "./cache";
 
 export type CurrentUser = any; // Will be properly typed when we rewrite the Employee model
 
-export async function getCurrentUser() {
+export const getCurrentUser = cache(async () => {
   const id = await getSessionEmployeeId();
   if (!id) return null;
   
@@ -111,7 +112,7 @@ export async function getCurrentUser() {
   }
   
   return { id, ...serializedUser, role: roleData } as any;
-}
+});
 
 export function isManagerLike(systemRole: string) {
   return systemRole === "ADMIN" || systemRole === "CEO" || systemRole === "MANAGER";

@@ -11,18 +11,15 @@ export default async function InsightsPage() {
   if (!user) return null;
 
   const weekStart = mondayOf();
-  const weekStartMs = weekStart.getTime();
-  const [allTasksSnap, kpiTemplatesSnap] = await Promise.all([
-    adminDb.collection("Task").where("assigneeId", "==", user.id).get(),
+  const [weeklyTasksSnap, kpiTemplatesSnap] = await Promise.all([
+    adminDb.collection("Task")
+      .where("assigneeId", "==", user.id)
+      .where("createdAt", ">=", weekStart)
+      .get(),
     fetchKpiTemplatesByRole(user.roleId, adminDb),
   ]);
 
-  // Filter to this week in JS — no composite index needed
-  const tasksSnap = { docs: allTasksSnap.docs ? allTasksSnap.docs.filter((d) => {
-    const raw = d.data().createdAt;
-    const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-    return createdAt.getTime() >= weekStartMs;
-  }) : [] };
+  const tasksSnap = { docs: weeklyTasksSnap.docs || [] };
 
   // Batch fetch KPI templates for tasks
   const kpiIds = tasksSnap.docs ? tasksSnap.docs.map((d: any) => d.data().kpiTemplateId).filter(Boolean) as string[] : [];

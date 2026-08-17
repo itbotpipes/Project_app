@@ -156,23 +156,30 @@ export async function batchFetchByIds<T>(
   const validIds = ids.filter(id => id && typeof id === 'string');
   if (validIds.length === 0) return new Map();
   
-  // Firestore 'in' query supports up to 10 items, so we need to batch
+  // Firebase Admin SDK v11+ supports up to 30 items in 'in' queries.
+  // This project uses firebase-admin@^14, so we use 30 (was 10).
+  const CHUNK_SIZE = 30;
   const chunks: string[][] = [];
-  for (let i = 0; i < validIds.length; i += 10) {
-    chunks.push(validIds.slice(i, i + 10));
+  for (let i = 0; i < validIds.length; i += CHUNK_SIZE) {
+    chunks.push(validIds.slice(i, i + CHUNK_SIZE));
   }
   
   const results = new Map<string, T>();
   
-  for (const chunk of chunks) {
-    const snap = await adminDb.collection(collectionName)
-      .where('__name__', 'in', chunk)
-      .get();
-    
+  // Parallel chunk queries — previously sequential (for chunk of chunks: await query)
+  const snapshots = await Promise.all(
+    chunks.map(chunk =>
+      adminDb.collection(collectionName)
+        .where('__name__', 'in', chunk)
+        .get()
+    )
+  );
+
+  snapshots.forEach(snap => {
     snap.docs.forEach((doc: any) => {
       results.set(doc.id, { id: doc.id, ...doc.data() } as T);
     });
-  }
+  });
   
   return results;
 }

@@ -17,15 +17,15 @@ export async function carryForwardOpenTasks(): Promise<number> {
   const endOfToday = new Date();
   endOfToday.setHours(23, 59, 0, 0);
 
+  // Query only tasks with a past dueAt that are not closed.
+  // Previously: fetched all non-CLOSED tasks and filtered in JS.
+  // Now: use the composite index [status ASC, dueAt ASC] to let Firestore filter.
   const staleSnap = await adminDb.collection("Task")
     .where("status", "!=", "CLOSED")
+    .where("dueAt", "<", startOfToday)
     .get();
 
-  // Filter in JS — no composite index needed
-  const staleDocs = staleSnap.docs.filter((doc) => {
-    const dueAt = toDate(doc.data().dueAt);
-    return dueAt && dueAt < startOfToday;
-  });
+  const staleDocs = staleSnap.docs.filter(doc => !doc.data().deletedAt);
 
   const batch = adminDb.batch();
   for (const doc of staleDocs) {
@@ -58,12 +58,14 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
   const employeesSnap = await adminDb.collection("Employee").where("active", "==", true).get();
   if (employeesSnap.empty) return 0;
 
-  const employees = employeesSnap.docs ? employeesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[] : [];
-  const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
+  const employees = employeesSnap.docs
+    ? (employeesSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[])
+    : [];
+  const roleIds = [...new Set(employees.map(e => e.roleId).filter(Boolean))];
 
-  // Batch fetch all KPI templates by role IDs
-  const kpisMap = await batchFetchByIds('KpiTemplate', roleIds, adminDb);
-  
+  // Batch fetch all KPI templates by role IDs (parallel, chunk size 30)
+  const kpisMap = await batchFetchByIds("KpiTemplate", roleIds, adminDb);
+
   // Group KPIs by role
   const kpisByRole = new Map<string, any[]>();
   kpisMap.forEach((kpi: any) => {
@@ -72,54 +74,77 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
     kpisByRole.get(roleId)!.push(kpi);
   });
 
-  const empIds = employees.map((e) => e.id);
+  const empIds = employees.map(e => e.id);
   const tasksByEmp = new Map<string, any[]>();
-  // Firestore "in" query supports max 30, batch if needed
+
+  // Chunk into groups of 30 and fetch in PARALLEL (was sequential)
+  const CHUNK = 30;
   const chunks: string[][] = [];
-  for (let i = 0; i < empIds.length; i += 30) chunks.push(empIds.slice(i, i + 30));
-  for (const chunk of chunks) {
-    const tasksSnap = await adminDb.collection("Task")
-      .where("assigneeId", "in", chunk)
-      .get();
-    // Filter date range in JS — no composite index needed
-    const prevMs = prev.getTime();
-    const monthEndMs = monthEnd.getTime();
-    for (const doc of tasksSnap.docs) {
-      const raw = doc.data().createdAt;
-      const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-      if (createdAt.getTime() < prevMs || createdAt.getTime() >= monthEndMs) continue;
-      const t: any = { ...doc.data(), completedAt: toDate(doc.data().completedAt), createdAt };
-      const arr = tasksByEmp.get(t.assigneeId) ?? [];
-      arr.push(t);
-      tasksByEmp.set(t.assigneeId, arr);
+  for (let i = 0; i < empIds.length; i += CHUNK) chunks.push(empIds.slice(i, i + CHUNK));
+
+  const taskSnaps = await Promise.all(
+    chunks.map(chunk =>
+      adminDb.collection("Task")
+        .where("assigneeId", "in", chunk)
+        .where("createdAt", ">=", prev)
+        .where("createdAt", "<", monthEnd)
+        .get()
+    )
+  );
+
+  // Accumulate tasks per employee (date filtering now done by Firestore)
+  for (const snap of taskSnaps) {
+    for (const doc of snap.docs) {
+      const t = doc.data();
+      const task: any = {
+        ...t,
+        completedAt: toDate(t.completedAt),
+        createdAt: toDate(t.createdAt) ?? new Date(0),
+      };
+      const arr = tasksByEmp.get(task.assigneeId) ?? [];
+      arr.push(task);
+      tasksByEmp.set(task.assigneeId, arr);
     }
   }
 
   let created = 0;
+
+  // Process each employee — batch all score writes per employee
   for (const e of employees) {
     const roleKpis = kpisByRole.get(e.roleId) ?? [];
     if (!roleKpis.length) continue;
+
     const auto = computeAutoScores(
-      roleKpis.map((k) => ({ id: k.id, weightage: k.weightage })),
-      tasksByEmp.get(e.id) ?? [],
+      roleKpis.map(k => ({ id: k.id, weightage: k.weightage })),
+      tasksByEmp.get(e.id) ?? []
     );
+
+    // Fetch all existing MonthlyScore docs for this employee/month in ONE query
+    const existingScoresSnap = await adminDb.collection("MonthlyScore")
+      .where("employeeId", "==", e.id)
+      .where("year", "==", year)
+      .where("month", "==", month)
+      .get();
+    const existingScoresByKpi = new Map<string, string>(); // kpiTemplateId → docId
+    existingScoresSnap.docs.forEach(d => existingScoresByKpi.set(d.data().kpiTemplateId, d.id));
+
+    // Batch all score writes for this employee
+    const scoreBatch = adminDb.batch();
     let autoTotal = 0;
     for (const k of roleKpis) {
       const a = auto.get(k.id)?.auto ?? 0;
       autoTotal += a;
-      const scoreSnap = await adminDb.collection("MonthlyScore")
-        .where("employeeId", "==", e.id)
-        .where("kpiTemplateId", "==", k.id)
-        .where("year", "==", year)
-        .where("month", "==", month)
-        .limit(1)
-        .get();
-      if (scoreSnap.empty) {
-        await adminDb.collection("MonthlyScore").add({ employeeId: e.id, kpiTemplateId: k.id, year, month, autoScore: a, score: a });
+      const existingId = existingScoresByKpi.get(k.id);
+      if (!existingId) {
+        const ref = adminDb.collection("MonthlyScore").doc();
+        scoreBatch.set(ref, { employeeId: e.id, kpiTemplateId: k.id, year, month, autoScore: a, score: a });
       } else {
-        await adminDb.collection("MonthlyScore").doc(scoreSnap.docs[0].id).update({ autoScore: a });
+        scoreBatch.update(adminDb.collection("MonthlyScore").doc(existingId), { autoScore: a });
       }
     }
+    await scoreBatch.commit();
+
+    // Upsert the MonthlyScorecard
     const cardSnap = await adminDb.collection("MonthlyScorecard")
       .where("employeeId", "==", e.id)
       .where("year", "==", year)
@@ -127,7 +152,11 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
       .limit(1)
       .get();
     if (cardSnap.empty) {
-      await adminDb.collection("MonthlyScorecard").add({ employeeId: e.id, year, month, total: autoTotal, autoTotal, source: "auto", locked: false, updatedAt: new Date() });
+      await adminDb.collection("MonthlyScorecard").add({
+        employeeId: e.id, year, month,
+        total: autoTotal, autoTotal,
+        source: "auto", locked: false, updatedAt: new Date(),
+      });
       created++;
     } else {
       const card = cardSnap.docs[0];

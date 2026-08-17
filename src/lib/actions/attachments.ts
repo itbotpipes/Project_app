@@ -47,15 +47,25 @@ export async function createReminder(formData: FormData) {
   const taskId = String(formData.get("taskId") || "");
   const remindAtRaw = String(formData.get("remindAt") || "");
   if (!taskId || !remindAtRaw) return { error: "Pick a date & time" };
-  
+
+  // Fetch the task once to denormalize employeeId + taskTitle onto the Reminder.
+  // This avoids org-wide reminder scans and N+1 task lookups in the poller.
+  const taskDoc = await adminDb.collection("Task").doc(taskId).get();
+  if (!taskDoc.exists) return { error: "Task not found" };
+  const task = taskDoc.data()!;
+
   const now = new Date();
-  
+
   await adminDb.collection("Reminder").add({
     taskId,
+    // Denormalized fields for efficient user-scoped querying
+    employeeId: task.assigneeId,
+    taskTitle: task.title,
     remindAt: new Date(remindAtRaw),
     sent: false,
+    createdAt: now,
   });
-  
+
   await adminDb.collection("AuditLog").add({
     actorId: user.id,
     action: "task.remind",
@@ -63,7 +73,7 @@ export async function createReminder(formData: FormData) {
     entityId: taskId,
     createdAt: now,
   });
-  
+
   revalidatePath(`/task/${taskId}`);
   return { ok: true };
 }

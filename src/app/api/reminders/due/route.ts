@@ -13,32 +13,49 @@ export async function GET() {
   if (!user) return NextResponse.json({ reminders: [] }, { status: 401 });
 
   const now = new Date();
-  const remindersSnap = await adminDb.collection("Reminder")
-    .where("sent", "==", false)
-    .get();
-  
-  const dueDocs = remindersSnap.docs
-    .filter(r => { const d = r.data().remindAt?.toDate?.() ?? null; return d && d <= now; })
-    .sort((a, b) => (a.data().remindAt?.toMillis?.() ?? 0) - (b.data().remindAt?.toMillis?.() ?? 0))
-    .slice(0, 10);
 
-  const results = await Promise.all(
-    dueDocs.map(async (r: any) => {
-      const rd = r.data();
-      const taskDoc = await adminDb.collection("Task").doc(rd.taskId).get();
-      if (!taskDoc.exists) return null;
-      const task = taskDoc.data()!;
-      if (task.assigneeId !== user.id) return null;
-      return {
-        id: r.id,
-        taskId: rd.taskId,
-        title: task.title,
-        remindAt: toDate(rd.remindAt),
-      };
-    })
-  );
+  let remindersSnap;
+  try {
+    remindersSnap = await adminDb.collection("Reminder")
+      .where("employeeId", "==", user.id)
+      .where("sent", "==", false)
+      .where("remindAt", "<=", now)
+      .orderBy("remindAt", "asc")
+      .limit(10)
+      .get();
+  } catch (err: any) {
+    console.error("[reminders-due] Failed to fetch reminders:", err);
+    return NextResponse.json({ error: "Failed to fetch reminders (e.g. index building)", details: err.message }, { status: 500 });
+  }
 
-  return NextResponse.json({
-    reminders: results.filter(Boolean),
+  if (remindersSnap.empty) {
+    return NextResponse.json({ reminders: [] });
+  }
+
+  // taskTitle is denormalized onto the Reminder document.
+  // For legacy docs that don't have it yet, batch-fetch in parallel (not sequentially).
+  const docsNeedingTitle = remindersSnap.docs.filter(r => !r.data().taskTitle);
+  let taskTitles = new Map<string, string>();
+
+  if (docsNeedingTitle.length > 0) {
+    const taskDocs = await Promise.all(
+      docsNeedingTitle.map(r => adminDb.collection("Task").doc(r.data().taskId).get())
+    );
+    taskDocs.forEach(td => {
+      if (td.exists) taskTitles.set(td.id, td.data()!.title);
+    });
+  }
+
+  const reminders = remindersSnap.docs.map(r => {
+    const rd = r.data();
+    const title = rd.taskTitle ?? taskTitles.get(rd.taskId) ?? "Task";
+    return {
+      id: r.id,
+      taskId: rd.taskId,
+      title,
+      remindAt: toDate(rd.remindAt)?.toISOString() ?? null,
+    };
   });
+
+  return NextResponse.json({ reminders });
 }

@@ -25,16 +25,20 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
 
   const [employeesSnap, closedTasksSnap, kpiTemplatesSnap] = await Promise.all([
     adminDb.collection("Employee").where("active", "==", true).get(),
-    adminDb.collection("Task").where("status", "==", "CLOSED").get(),
+    // Date-bounded: only tasks completed this week.
+    // Previously: .where("status","==","CLOSED").get() fetched ALL closed tasks ever.
+    // With a 50-person team and 2 years of history that's 50,000+ documents.
+    adminDb.collection("Task")
+      .where("status", "==", "CLOSED")
+      .where("completedAt", ">=", weekStart)
+      .get(),
     adminDb.collection("KpiTemplate").get(),
   ]);
 
-  // Filter in JS — no composite index needed
-  const weekStartMs = weekStart.getTime();
-  const filteredClosedTasks = closedTasksSnap.docs ? closedTasksSnap.docs.filter((doc) => {
-    const completedAt = toDate(doc.data().completedAt);
-    return completedAt && completedAt.getTime() >= weekStartMs;
-  }) : [];
+
+  // Firestore already filtered completedAt >= weekStart, so all docs in this snap are this week.
+  const filteredClosedTasks = closedTasksSnap.docs ?? [];
+
 
   // Only count KPIs that have weightage > 0
   const weightedKpis = kpiTemplatesSnap.docs ? kpiTemplatesSnap.docs.filter((d) => (d.data().weightage ?? 0) > 0) : [];

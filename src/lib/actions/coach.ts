@@ -7,36 +7,27 @@ import { computeWeeklyInsights } from "@/lib/insights";
 
 async function gatherContext(userId: string, roleId: string) {
   const weekStart = mondayOf();
-  const weekStartMs = weekStart.getTime();
-  const [allTasksSnap, kpisSnap] = await Promise.all([
-    adminDb.collection("Task").where("assigneeId", "==", userId).get(),
+  const [weeklyTasksSnap, kpisSnap] = await Promise.all([
+    adminDb.collection("Task")
+      .where("assigneeId", "==", userId)
+      .where("createdAt", ">=", weekStart)
+      .get(),
     adminDb.collection("KpiTemplate").where("roleId", "==", roleId).get(),
   ]);
 
-  // Filter to this week in JS — no composite index needed
-  const weeklyDocs = allTasksSnap.docs.filter((doc) => {
-    const raw = doc.data().createdAt;
-    const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
-    return createdAt.getTime() >= weekStartMs;
-  });
+  const kpisMap = new Map(kpisSnap.docs.map(doc => [doc.id, doc.data().kpiName]));
 
-  const tasks = await Promise.all(
-    weeklyDocs.map(async (doc) => {
-      const t = doc.data();
-      let kpiName: string | null = null;
-      if (t.kpiTemplateId) {
-        const kpiDoc = await adminDb.collection("KpiTemplate").doc(t.kpiTemplateId).get();
-        kpiName = kpiDoc.exists ? kpiDoc.data()!.kpiName : null;
-      }
-      return {
-        status: t.status,
-        createdAt: t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt),
-        completedAt: t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
-        carryCount: t.carryCount ?? 0,
-        kpiName,
-      };
-    })
-  );
+  const tasks = weeklyTasksSnap.docs.map((doc) => {
+    const t = doc.data();
+    const kpiName = t.kpiTemplateId ? (kpisMap.get(t.kpiTemplateId) ?? null) : null;
+    return {
+      status: t.status,
+      createdAt: t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt),
+      completedAt: t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
+      carryCount: t.carryCount ?? 0,
+      kpiName,
+    };
+  });
 
   const buckets = kpisSnap.size;
   const insights = computeWeeklyInsights(tasks, buckets);

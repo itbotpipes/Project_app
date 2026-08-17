@@ -32,18 +32,34 @@ export default async function Dashboard() {
   const todayStart = new Date();
   todayStart.setHours(0, 0, 0, 0);
 
+  const monthStart = new Date(todayStart.getFullYear(), todayStart.getMonth(), 1);
+
+  // Three targeted queries replace the single all-history Task fetch:
+  //  1. Open/active tasks — for overdue, due-today, on-hold counts. No history needed.
+  //  2. Month-bounded tasks — for streak, closed-today, adherence.
+  //  3. DailyRitual — for plan adherence check.
+  // An employee with 5,000 tasks no longer downloads all 5,000 on every Dashboard load.
   const [
     myCardsSnap,
     openTasksSnap,
+    monthTasksSnap,
     ritualSnap,
-    closedTasksSnap,
     taskAnalysis,
   ] = await Promise.all([
     adminDb.collection("MonthlyScorecard").where("employeeId", "==", user.id).get(),
-    adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "!=", "CLOSED").get(),
+    // Active tasks only — covers overdue, due-today, open count
+    adminDb.collection("Task")
+      .where("assigneeId", "==", user.id)
+      .where("status", "!=", "CLOSED")
+      .where("deletedAt", "==", null)
+      .get(),
+    // This month's tasks — covers streak, closed-today, adherence
+    adminDb.collection("Task")
+      .where("assigneeId", "==", user.id)
+      .where("createdAt", ">=", monthStart)
+      .get(),
     adminDb.collection("DailyRitual").where("employeeId", "==", user.id).where("date", "==", todayStart).get(),
-    adminDb.collection("Task").where("assigneeId", "==", user.id).where("status", "==", "CLOSED").get(),
-    loadDailyTaskAnalysis(user.id),
+    loadDailyTaskAnalysis(user.id, user.roleId),
   ]);
 
   // My monthly scorecards
@@ -61,12 +77,13 @@ export default async function Dashboard() {
   const avg = recentAverage(myCards);
   const band = incrementBand(avg);
 
-  // Tasks
-  const activeOpenTasks = openTasksSnap.docs.filter(d => !d.data().deletedAt);
-  const openTasks = activeOpenTasks.length;
-  
+  // Tasks — from targeted queries
+  const openDocs = openTasksSnap.docs || [];
+  const monthDocs = monthTasksSnap.docs || [];
+  const openTasks = openDocs.length;
+
   let dueToday = 0;
-  for (const doc of activeOpenTasks) {
+  for (const doc of openDocs) {
     const dueAt = toDate(doc.data().dueAt);
     if (dueAt && dueAt.getTime() <= todayEnd.getTime()) dueToday++;
   }
@@ -74,19 +91,22 @@ export default async function Dashboard() {
   // Daily ritual state
   const ritual = ritualSnap.empty ? null : (ritualSnap.docs[0].data() as any);
 
-  // Plan adherence
-  const closedTodayTasks = closedTasksSnap.docs.filter(d => {
+  // Adherence — closed tasks completed today (from month-bounded snap)
+  const closedTodayTasks = monthDocs.filter(d => {
     const cAt = toDate(d.data().completedAt);
-    return cAt && cAt.getTime() >= todayStart.getTime() && !d.data().deletedAt;
+    return d.data().status === "CLOSED" && cAt && cAt.getTime() >= todayStart.getTime() && !d.data().deletedAt;
   }).map(d => ({ id: d.id }));
-  
-  const adherence = computeAdherence(ritual?.plannedTaskIds ?? null, closedTodayTasks.map((t) => t.id));
 
-  // Streak & badges
-  const completedDates = closedTasksSnap.docs ? closedTasksSnap.docs.map((d: any) => toDate(d.data().completedAt)).filter(Boolean) as Date[] : [];
+  const adherence = computeAdherence(ritual?.plannedTaskIds ?? null, closedTodayTasks.map(t => t.id));
+
+  // Streak & badges — from month-bounded closed tasks (streak within month is sufficient for display)
+  const completedDates = monthDocs
+    .filter(d => d.data().status === "CLOSED")
+    .map(d => toDate(d.data().completedAt))
+    .filter(Boolean) as Date[];
   const streak = computeStreak(completedDates);
   const badges = streakBadges(streak);
-  
+
   const closedTodayCount = closedTodayTasks.length;
   const celebrate = openTasks === 0 && closedTodayCount > 0;
 

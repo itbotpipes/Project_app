@@ -18,6 +18,7 @@ export async function GET() {
     .sort((a, b) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0))
     .slice(0, 10);
 
+  // Parallel fetch — replace sequential N+1 loop
   const results = await Promise.all(
     sortedDocs.map(async (w: any) => {
       const wd = w.data();
