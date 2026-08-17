@@ -67,8 +67,8 @@
       "collectionGroup": "Task",
       "queryScope": "COLLECTION",
       "fields": [
-        { "fieldPath": "status", "order": "ASCENDING" },
-        { "fieldPath": "dueAt", "order": "ASCENDING" }
+        { "fieldPath": "dueAt", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
     {
