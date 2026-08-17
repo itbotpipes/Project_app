@@ -170,6 +170,14 @@
       "collectionGroup": "Task",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "completedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "Task",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "assigneeId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "ASCENDING" },
         { "fieldPath": "kpiTemplateId", "order": "ASCENDING" }
