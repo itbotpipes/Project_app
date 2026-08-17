@@ -102,6 +102,7 @@ export async function createTask(formData: FormData) {
 
   revalidatePath("/board");
   revalidatePath("/team");
+  revalidatePath("/delegated");
   if (groupId) revalidatePath(`/groups/${groupId}`);
   return { ok: true, id: taskRef.id };
 }
@@ -151,6 +152,7 @@ export async function updateTask(formData: FormData) {
   });
 
   revalidatePath("/board");
+  revalidatePath("/delegated");
   revalidatePath(`/task/${taskId}`);
   return { ok: true };
 }
@@ -201,6 +203,7 @@ export async function moveTask(formData: FormData) {
 
   revalidatePath("/board");
   revalidatePath("/team");
+  revalidatePath("/delegated");
   revalidatePath("/");
   revalidatePath(`/task/${taskId}`);
   return { ok: true };
@@ -232,6 +235,7 @@ export async function softDeleteTask(formData: FormData) {
 
   revalidatePath("/board");
   revalidatePath("/deleted");
+  revalidatePath("/delegated");
   if (task.groupId) revalidatePath(`/groups/${task.groupId}`);
 }
 
@@ -261,6 +265,7 @@ export async function restoreTask(formData: FormData) {
 
   revalidatePath("/board");
   revalidatePath("/deleted");
+  revalidatePath("/delegated");
 }
 
 export async function toggleWatch(formData: FormData) {
