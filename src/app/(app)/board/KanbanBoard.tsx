@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { moveTask, softDeleteTask } from "@/lib/actions/tasks";
@@ -57,6 +57,10 @@ export default function KanbanBoard({
   const [overCol, setOverCol] = useState<string | null>(null);
   const [, startTransition] = useTransition();
   const router = useRouter();
+
+  useEffect(() => {
+    setTasks(initialTasks);
+  }, [initialTasks]);
 
   function colOf(status: string) {
     return columns.includes(status) ? status : "NEW";

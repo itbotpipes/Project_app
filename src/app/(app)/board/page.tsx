@@ -248,7 +248,11 @@ export default async function BoardPage({
       <p className="text-xs text-slate-400">
         💡 Drag a card between columns to change its status — or use the &quot;Move to…&quot; dropdown on each card.
       </p>
-      <KanbanBoard initialTasks={boardTasks} columns={[...TASK_STATUS_ORDER]} />
+      <KanbanBoard 
+        initialTasks={boardTasks} 
+        columns={[...TASK_STATUS_ORDER]} 
+        key={boardTasks.map(t => t.id + t.status).join(",")} 
+      />
     </div>
   );
 }
