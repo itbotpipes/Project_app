@@ -28,6 +28,12 @@ const quadTone: Record<string, string> = {
   Eliminate: "bg-slate-100 text-slate-500",
 };
 
+const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+function fmtDate(d: Date | null): string | null {
+  if (!d) return null;
+  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+}
+
 export default function TaskCard({
   task,
   showAssignee = false,
@@ -74,7 +80,7 @@ export default function TaskCard({
       <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
         {task.project && <span>📁 {task.project.name}</span>}
         {task.estimatedMins != null && <span>⏱ {task.estimatedMins}m</span>}
-        {task.dueAt && <span>📅 {new Date(task.dueAt).toLocaleDateString()}</span>}
+        {task.dueAt && <span>📅 {fmtDate(task.dueAt)}</span>}
         {showAssignee && task.assignee && <span>👤 {task.assignee.name}</span>}
       </div>
 

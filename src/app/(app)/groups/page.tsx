@@ -61,7 +61,7 @@ export default async function GroupsPage() {
       adminDb.collection("Task").where("groupId", "in", groupIds).where("deletedAt", "==", null).where("status", "!=", "CLOSED").get(),
       adminDb.collection("Task").where("groupId", "in", groupIds).where("deletedAt", "==", null).where("status", "==", "CLOSED").get(),
     ]);
-    
+
     openTasksSnap.docs?.forEach((t: any) => {
       const groupId = t.data().groupId;
       if (groupId) {
@@ -70,7 +70,7 @@ export default async function GroupsPage() {
         taskCountsByGroup.set(groupId, cur);
       }
     });
-    
+
     doneTasksSnap.docs?.forEach((t: any) => {
       const groupId = t.data().groupId;
       if (groupId) {

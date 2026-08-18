@@ -56,6 +56,7 @@ export async function createTask(formData: FormData) {
     groupId,
     carryCount: 0,
     reworkCount: 0,
+    deletedAt: null,   // must be explicit null for Firestore equality queries
     createdAt: now,
     updatedAt: now,
   });
@@ -236,6 +237,7 @@ export async function softDeleteTask(formData: FormData) {
   revalidatePath("/board");
   revalidatePath("/deleted");
   revalidatePath("/delegated");
+  revalidatePath(`/task/${taskId}`);
   if (task.groupId) revalidatePath(`/groups/${task.groupId}`);
 }
 
