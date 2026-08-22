@@ -41,18 +41,19 @@ export default async function BoardPage({
       .where("assigneeId", "==", user.id)
       .where("createdAt", ">=", startOfMonth)
       .get(),
-    adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
+    adminDb.collection("KpiTemplate").get(),
     isManagerLike(user.systemRole)
       ? cachedFetch("active-employees", () => adminDb.collection("Employee").where("active", "==", true).get(), 300)
       : Promise.resolve({ docs: [] }),
     loadTemplateOptions(),
   ]);
 
-  const kpiOptions = kpiOptionsSnap.docs
+  const allKpis = kpiOptionsSnap.docs
     ? kpiOptionsSnap.docs
         .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-        .map(d => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName }))
+        .map(d => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName, roleId: d.data().roleId }))
     : [];
+  const kpiOptions = allKpis.filter(k => k.roleId === user.roleId);
 
   // Active board tasks from the open/active tasks snap.
   // We can also merge recently closed tasks from monthTasksSnap if we want them on the board,
@@ -202,7 +203,7 @@ export default async function BoardPage({
             {tasks?.length ?? 0} task{(tasks?.length ?? 0) === 1 ? "" : "s"} · every task fills a KPI bucket
           </p>
         </div>
-        <NewTaskDialog kpiOptions={kpiOptions} people={people} selfId={user.id} todaysCounts={todaysCounts} templates={templates} />
+        <NewTaskDialog kpiOptions={allKpis} people={people} selfId={user.id} todaysCounts={todaysCounts} templates={templates} />
       </div>
 
       <Card>

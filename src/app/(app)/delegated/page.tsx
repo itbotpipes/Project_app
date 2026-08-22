@@ -40,7 +40,7 @@ export default async function DelegatedTasksPage() {
       () => adminDb.collection("Employee").where("active", "==", true).get(),
       300 // cache for 5 minutes
     ),
-    fetchKpiTemplatesByRole(user.roleId, adminDb),
+    adminDb.collection("KpiTemplate").get(),
   ]);
 
   // Filter out self-assigned and deleted tasks
@@ -80,8 +80,8 @@ export default async function DelegatedTasksPage() {
     .filter((e: any) => e.id !== user.id)
     .sort((a: any, b: any) => a.name.localeCompare(b.name)) : [];
   const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
-    .sort((a: any, b: any) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map((d: any) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName })) : [];
+    .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
+    .map((d: any) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName, roleId: d.data().roleId })) : [];
   const templates = await loadTemplateOptions();
 
   const open = delegated.filter((t) => t.status !== "CLOSED");

@@ -2,10 +2,12 @@
 
 import { useRef, useState } from "react";
 import { addComment } from "@/lib/actions/attachments";
+import { useTaskDrawer } from "../../_components/TaskDrawerContext";
 
 export default function CommentForm({ taskId }: { taskId: string }) {
   const ref = useRef<HTMLFormElement>(null);
   const [busy, setBusy] = useState(false);
+  const ctx = useTaskDrawer();
   return (
     <form
       ref={ref}
@@ -14,6 +16,7 @@ export default function CommentForm({ taskId }: { taskId: string }) {
         await addComment(fd);
         ref.current?.reset();
         setBusy(false);
+        ctx?.refresh();
       }}
       className="flex gap-2"
     >

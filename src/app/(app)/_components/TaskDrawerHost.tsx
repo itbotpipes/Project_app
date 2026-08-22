@@ -46,7 +46,7 @@ export default function TaskDrawerHost() {
     return () => {
       cancelled = true;
     };
-  }, [openTaskId]);
+  }, [openTaskId, ctx?.refreshTrigger]);
 
   if (!ctx || !openTaskId) return null;
 

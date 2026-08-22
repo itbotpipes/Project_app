@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
+import { redirect } from "next/navigation";
 
 export async function createGroup(formData: FormData) {
   const user = await getCurrentUser();
@@ -20,6 +21,7 @@ export async function createGroup(formData: FormData) {
     description,
     departmentId,
     createdById: user.id,
+    active: true,
     createdAt: new Date(),
   });
 
@@ -42,6 +44,61 @@ export async function createGroup(formData: FormData) {
     detail: name,
     createdAt: new Date(),
   });
+  revalidatePath("/groups");
+}
+
+export async function deactivateGroup(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!user) return;
+  const groupId = String(formData.get("groupId") || "");
+  if (!groupId) return;
+
+  const groupDoc = await adminDb.collection("Group").doc(groupId).get();
+  if (!groupDoc.exists) return;
+  const group = groupDoc.data()!;
+
+  const allowed = group.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO";
+  if (!allowed) return;
+
+  await adminDb.collection("Group").doc(groupId).update({ active: false });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "group.deactivate",
+    entity: "Group",
+    entityId: groupId,
+    detail: group.name,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/groups");
+  redirect("/groups");
+}
+
+export async function activateGroup(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!user) return;
+  const groupId = String(formData.get("groupId") || "");
+  if (!groupId) return;
+
+  const groupDoc = await adminDb.collection("Group").doc(groupId).get();
+  if (!groupDoc.exists) return;
+  const group = groupDoc.data()!;
+
+  const allowed = group.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO";
+  if (!allowed) return;
+
+  await adminDb.collection("Group").doc(groupId).update({ active: true });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "group.activate",
+    entity: "Group",
+    entityId: groupId,
+    detail: group.name,
+    createdAt: new Date(),
+  });
+
   revalidatePath("/groups");
 }
 

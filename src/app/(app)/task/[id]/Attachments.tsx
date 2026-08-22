@@ -4,9 +4,11 @@ import { useRef, useState } from "react";
 import { Paperclip, Mic, Square, Loader2 } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { uploadTaskAttachment } from "@/lib/actions/attachments";
+import { useTaskDrawer } from "../../_components/TaskDrawerContext";
 
 export default function Attachments({ taskId }: { taskId: string }) {
   const router = useRouter();
+  const ctx = useTaskDrawer();
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
@@ -24,7 +26,10 @@ export default function Attachments({ taskId }: { taskId: string }) {
     const res = await uploadTaskAttachment(fd);
     setBusy(false);
     if (res?.error) setError(res.error);
-    else router.refresh();
+    else {
+      ctx?.refresh();
+      router.refresh();
+    }
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {

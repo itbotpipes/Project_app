@@ -4,6 +4,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { Card } from "../_components/ui";
 import CreateGroupDialog from "./CreateGroupDialog";
 import { batchFetchByIds, cachedFetch, fetchAllDepartments } from "@/lib/cache";
+import ReactivateGroupButton from "./ReactivateGroupButton";
 
 export default async function GroupsPage() {
   const user = await getCurrentUser();
@@ -103,12 +104,17 @@ export default async function GroupsPage() {
       name: serializedGroup.name,
       description: serializedGroup.description ?? null,
       departmentId: serializedGroup.departmentId,
+      active: serializedGroup.active !== false,
+      createdById: serializedGroup.createdById ?? null,
       members,
       openCount: counts.open,
       doneCount: counts.done,
       department: department ? { name: department.name } : null,
     };
   }).sort((a, b) => a.name.localeCompare(b.name)) : [];
+
+  const activeGroups = groups.filter((g) => g.active);
+  const deactivatedGroups = groups.filter((g) => !g.active && (g.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO"));
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">
@@ -122,15 +128,15 @@ export default async function GroupsPage() {
         {isManagerLike(user.systemRole) && <CreateGroupDialog departments={departments} people={people} />}
       </div>
 
-      {groups.length === 0 ? (
+      {activeGroups.length === 0 ? (
         <Card>
           <p className="text-sm text-slate-400">
-            No groups yet. {isManagerLike(user.systemRole) ? "Create one with the + button above." : "Ask a manager to create one."}
+            No active groups yet. {isManagerLike(user.systemRole) ? "Create one with the + button above." : "Ask a manager to create one."}
           </p>
         </Card>
       ) : (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-          {groups.map((g) => (
+          {activeGroups.map((g) => (
             <Link key={g.id} href={`/groups/${g.id}`}>
               <Card className="h-full transition hover:border-emerald-300 hover:shadow-md">
                 <div className="flex items-start justify-between gap-2">
@@ -151,6 +157,23 @@ export default async function GroupsPage() {
               </Card>
             </Link>
           ))}
+        </div>
+      )}
+
+      {deactivatedGroups.length > 0 && (
+        <div className="mt-8 space-y-3">
+          <h2 className="text-lg font-semibold text-slate-900">Deactivated Groups (Created by You)</h2>
+          <div className="divide-y divide-slate-100 rounded-2xl border border-slate-200 bg-white p-4">
+            {deactivatedGroups.map((g) => (
+              <div key={g.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
+                <div>
+                  <h3 className="text-sm font-semibold text-slate-900">{g.name}</h3>
+                  {g.description && <p className="text-xs text-slate-500">{g.description}</p>}
+                </div>
+                <ReactivateGroupButton groupId={g.id} groupName={g.name} />
+              </div>
+            ))}
+          </div>
         </div>
       )}
     </div>

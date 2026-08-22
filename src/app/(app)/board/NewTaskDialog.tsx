@@ -6,7 +6,7 @@ import { createTask } from "@/lib/actions/tasks";
 import BucketFill from "../_components/BucketFill";
 import DateTimePicker from "../_components/DateTimePicker";
 
-type KpiOpt = { id: string; kpiName: string; kraName: string };
+type KpiOpt = { id: string; kpiName: string; kraName: string; roleId?: string };
 type Person = { id: string; name: string; roleId?: string };
 export type TemplateOpt = {
   id: string;
@@ -57,6 +57,7 @@ export default function NewTaskDialog({
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
   const assigneeRoleId = people.find((p) => p.id === assigneeId)?.roleId;
+  const filteredKpiOptions = kpiOptions.filter((k) => !k.roleId || k.roleId === assigneeRoleId);
   const templatesForAssignee = (templates ?? []).filter((t) => !t.roleId || t.roleId === assigneeRoleId);
 
   function applyTemplate(templateId: string) {
@@ -223,14 +224,14 @@ export default function NewTaskDialog({
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
                   >
                     <option value="">— none —</option>
-                    {kpiOptions.map((k) => (
+                    {filteredKpiOptions.map((k) => (
                       <option key={k.id} value={k.id}>
                         {k.kpiName}
                       </option>
                     ))}
                   </select>
                 </label>
-                {kpiOptions.length > 0 && (
+                {filteredKpiOptions.length > 0 && (
                   <div className="col-span-2 -mt-1 rounded-lg bg-slate-50 p-3">
                     <p className="mb-2 text-[11px] text-slate-500">
                       Today&apos;s buckets — see where this task will land:
@@ -238,7 +239,7 @@ export default function NewTaskDialog({
                     <BucketFill
                       size="sm"
                       highlightId={selectedKpi}
-                      buckets={kpiOptions.map((k) => ({ id: k.id, name: k.kpiName, count: todaysCounts[k.id] ?? 0 }))}
+                      buckets={filteredKpiOptions.map((k) => ({ id: k.id, name: k.kpiName, count: todaysCounts[k.id] ?? 0 }))}
                     />
                   </div>
                 )}
@@ -247,9 +248,20 @@ export default function NewTaskDialog({
                   <select
                     name="assigneeId"
                     value={assigneeId}
-                    onChange={(e) => setAssigneeId(e.target.value)}
+                    onChange={(e) => {
+                      const nextAssigneeId = e.target.value;
+                      setAssigneeId(nextAssigneeId);
+                      
+                      // Reset selected KPI if it's not applicable to the new assignee
+                      const nextRoleId = people.find((p) => p.id === nextAssigneeId)?.roleId;
+                      const nextKpiOpts = kpiOptions.filter((k) => !k.roleId || k.roleId === nextRoleId);
+                      if (!nextKpiOpts.some(k => k.id === selectedKpi)) {
+                        setSelectedKpi("");
+                      }
+                    }}
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
                   >
+                    {groupId && <option value="ALL_MEMBERS">Whole Group Team</option>}
                     {people.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}

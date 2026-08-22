@@ -12,6 +12,9 @@ import GroupMembers from "./GroupMembers";
 import ExchangeControl from "./ExchangeControl";
 import TaskLink from "../../_components/TaskLink";
 import { batchFetchByIds, cachedFetch } from "@/lib/cache";
+import DeactivateGroupButton from "./DeactivateGroupButton";
+import DeleteAnnouncementButton from "./DeleteAnnouncementButton";
+import { createGroupAnnouncement } from "@/lib/actions/announcements";
 
 const STATUS_TONE: Record<string, string> = {
   NEW: "bg-slate-100 text-slate-600",
@@ -35,26 +38,29 @@ export default async function GroupDetailPage({
   searchParams,
 }: {
   params: Promise<{ id: string }>;
-  searchParams: Promise<{ tab?: string; scope?: string }>;
+  searchParams: Promise<{ tab?: string; scope?: string; view?: string }>;
 }) {
   const { id } = await params;
   const sp = await searchParams;
   const user = await getCurrentUser();
+  const view = sp.view === "announcements" ? "announcements" : "tasks";
   if (!user) return null;
 
   const groupDoc = await adminDb.collection("Group").doc(id).get();
   if (!groupDoc.exists) notFound();
   const group = { id: groupDoc.id, ...groupDoc.data() } as any;
+  if (group.active === false) notFound();
 
-  const [membersSnap, tasksSnap, kpiOptionsSnap, allPeopleSnap] = await Promise.all([
+  const [membersSnap, tasksSnap, kpiOptionsSnap, allPeopleSnap, announcementsSnap] = await Promise.all([
     adminDb.collection("GroupMember").where("groupId", "==", id).get(),
     adminDb.collection("Task").where("groupId", "==", id).where("deletedAt", "==", null).get(),
-    adminDb.collection("KpiTemplate").where("roleId", "==", user.roleId).get(),
+    adminDb.collection("KpiTemplate").get(),
     cachedFetch(
       'active-employees',
       () => adminDb.collection("Employee").where("active", "==", true).get(),
       300 // cache for 5 minutes
     ),
+    adminDb.collection("Announcement").where("groupId", "==", id).get(),
   ]);
 
   // Resolve member employees - batch fetch
@@ -117,12 +123,29 @@ export default async function GroupDetailPage({
   // Sort in JS — no composite index needed
   const kpiOptions = kpiOptionsSnap.docs ? kpiOptionsSnap.docs
     .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName })) : [];
+    .map((d) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName, roleId: d.data().roleId })) : [];
   const allPeople = allPeopleSnap.docs ? allPeopleSnap.docs
     .map((d) => ({ id: d.id, name: d.data().name }))
     .sort((a, b) => a.name.localeCompare(b.name)) : [];
-  const memberPeople = memberEmployees.map((m) => ({ id: m.id, name: m.name }));
+  const memberPeople = memberEmployees.map((m) => ({ id: m.id, name: m.name, roleId: m.roleId }));
   const templates = await loadTemplateOptions();
+
+  // Resolve announcement author names
+  const announcementDocs = announcementsSnap.docs ?? [];
+  const announcementAuthorIds = Array.from(new Set(announcementDocs.map((doc: any) => doc.data().authorId).filter(Boolean))) as string[];
+  const announcementAuthorsMap = await batchFetchByIds('Employee', announcementAuthorIds, adminDb);
+
+  const announcements = announcementDocs.map((doc: any) => {
+    const data = doc.data();
+    const author = data.authorId ? (announcementAuthorsMap.get(data.authorId) as any) : null;
+    return {
+      id: doc.id,
+      body: data.body,
+      authorName: author?.name ?? "Unknown",
+      authorId: data.authorId,
+      createdAt: toDate(data.createdAt) ?? new Date(),
+    };
+  }).sort((a: any, b: any) => b.createdAt.getTime() - a.createdAt.getTime());
 
   const scope = sp.scope === "mine" ? "mine" : "all";
   const scoped = scope === "mine" ? tasks.filter((t) => t.assigneeId === user.id) : tasks;
@@ -146,6 +169,7 @@ export default async function GroupDetailPage({
     const qs = new URLSearchParams();
     if (t !== "all") qs.set("tab", t);
     if (scope === "mine") qs.set("scope", "mine");
+    if (view !== "tasks") qs.set("view", view);
     const q = qs.toString();
     return `/groups/${id}${q ? `?${q}` : ""}`;
   }
@@ -153,6 +177,13 @@ export default async function GroupDetailPage({
     const qs = new URLSearchParams();
     if (tab !== "all") qs.set("tab", tab);
     if (s === "mine") qs.set("scope", "mine");
+    if (view !== "tasks") qs.set("view", view);
+    const q = qs.toString();
+    return `/groups/${id}${q ? `?${q}` : ""}`;
+  }
+  function viewHref(v: "tasks" | "announcements") {
+    const qs = new URLSearchParams();
+    if (v !== "tasks") qs.set("view", v);
     const q = qs.toString();
     return `/groups/${id}${q ? `?${q}` : ""}`;
   }
@@ -171,72 +202,151 @@ export default async function GroupDetailPage({
             <p className="text-sm text-slate-500">{group.description || "No description"}</p>
           </div>
         </div>
-        <NewTaskDialog kpiOptions={kpiOptions} people={memberPeople} selfId={user.id} todaysCounts={{}} groupId={group.id} buttonLabel="Assign Task" templates={templates} />
+        <div className="flex flex-wrap items-center gap-2">
+          {(group.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO") && (
+            <DeactivateGroupButton groupId={group.id} />
+          )}
+          <NewTaskDialog kpiOptions={kpiOptions} people={memberPeople} selfId={user.id} todaysCounts={{}} groupId={group.id} buttonLabel="Assign Task" templates={templates} />
+        </div>
       </div>
 
-      <Card>
-        <SectionTitle>Members</SectionTitle>
-        <GroupMembers
-          groupId={group.id}
-          members={memberEmployees.map((m) => ({ id: m.id, name: m.name, role: m.role }))}
-          allPeople={allPeople}
-          canManage={canManage}
-        />
-      </Card>
+      <div className="flex gap-2 border-b border-slate-200">
+        <Link
+          href={viewHref("tasks")}
+          className={cn(
+            "px-4 py-2 border-b-2 font-medium text-sm transition-colors",
+            view === "tasks"
+              ? "border-emerald-600 text-emerald-600 font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          )}
+        >
+          Tasks
+        </Link>
+        <Link
+          href={viewHref("announcements")}
+          className={cn(
+            "px-4 py-2 border-b-2 font-medium text-sm transition-colors",
+            view === "announcements"
+              ? "border-emerald-600 text-emerald-600 font-semibold"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          )}
+        >
+          Announcements ({announcements.length})
+        </Link>
+      </div>
 
-      <Card>
-        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex gap-1 rounded-full bg-slate-100 p-0.5 text-xs">
-            <Link href={scopeHref("all")} className={cn("rounded-full px-2.5 py-1 font-medium", scope === "all" ? "bg-white shadow-sm" : "text-slate-500")}>
-              All Task <span className="ml-1 rounded-full bg-slate-200 px-1.5">{tasks.length}</span>
-            </Link>
-            <Link href={scopeHref("mine")} className={cn("rounded-full px-2.5 py-1 font-medium", scope === "mine" ? "bg-white shadow-sm" : "text-slate-500")}>
-              My Task
-            </Link>
-          </div>
-          <div className="flex flex-wrap gap-1.5 text-xs">
-            <Link href={tabHref("overdue")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "overdue" ? "bg-red-600 text-white" : "bg-red-50 text-red-600")}>OverDue - {counts.overdue}</Link>
-            <Link href={tabHref("pending")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "pending" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600")}>Pending - {counts.pending}</Link>
-            <Link href={tabHref("inprogress")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "inprogress" ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-600")}>In Progress - {counts.inprogress}</Link>
-            <Link href={tabHref("completed")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "completed" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-600")}>Completed - {counts.completed}</Link>
-          </div>
-        </div>
+      {view === "tasks" ? (
+        <>
+          <Card>
+            <SectionTitle>Members</SectionTitle>
+            <GroupMembers
+              groupId={group.id}
+              members={memberEmployees.map((m) => ({ id: m.id, name: m.name, role: m.role }))}
+              allPeople={allPeople}
+              canManage={canManage}
+            />
+          </Card>
 
-        {filtered.length === 0 ? (
-          <div className="py-10 text-center">
-            <p className="text-lg font-semibold text-slate-700">No Task Here</p>
-            <p className="text-sm text-slate-400">It seems there aren&apos;t any tasks in this list</p>
-          </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {filtered.map((t) => {
-              const quad = priorityQuadrant(t.urgent, t.important);
-              const done = t.checklistItems.filter((c) => c.done).length;
-              return (
-                <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
-                  <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-200 text-[11px] font-semibold text-slate-700">
-                    {t.assignee.name.split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <TaskLink taskId={t.id} className="truncate text-sm font-medium text-slate-900 hover:text-blue-600 hover:underline">{t.title}</TaskLink>
-                    <div className="text-xs text-slate-500">
-                      → {t.assignee.name}
-                      {t.kpiTemplate && <> · {t.kpiTemplate.kpiName}</>}
-                      {t.dueAt && <> · due {t.dueAt.toLocaleDateString()}</>}
-                      {t.checklistItems.length > 0 && <> · ☑ {done}/{t.checklistItems.length}</>}
+          <Card>
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex gap-1 rounded-full bg-slate-100 p-0.5 text-xs">
+                <Link href={scopeHref("all")} className={cn("rounded-full px-2.5 py-1 font-medium", scope === "all" ? "bg-white shadow-sm" : "text-slate-500")}>
+                  All Task <span className="ml-1 rounded-full bg-slate-200 px-1.5">{tasks.length}</span>
+                </Link>
+                <Link href={scopeHref("mine")} className={cn("rounded-full px-2.5 py-1 font-medium", scope === "mine" ? "bg-white shadow-sm" : "text-slate-500")}>
+                  My Task
+                </Link>
+              </div>
+              <div className="flex flex-wrap gap-1.5 text-xs">
+                <Link href={tabHref("overdue")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "overdue" ? "bg-red-600 text-white" : "bg-red-50 text-red-600")}>OverDue - {counts.overdue}</Link>
+                <Link href={tabHref("pending")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "pending" ? "bg-slate-800 text-white" : "bg-slate-100 text-slate-600")}>Pending - {counts.pending}</Link>
+                <Link href={tabHref("inprogress")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "inprogress" ? "bg-amber-500 text-white" : "bg-amber-50 text-amber-600")}>In Progress - {counts.inprogress}</Link>
+                <Link href={tabHref("completed")} className={cn("rounded-full px-2.5 py-1 font-medium", tab === "completed" ? "bg-emerald-600 text-white" : "bg-emerald-50 text-emerald-600")}>Completed - {counts.completed}</Link>
+              </div>
+            </div>
+
+            {filtered.length === 0 ? (
+              <div className="py-10 text-center">
+                <p className="text-lg font-semibold text-slate-700">No Task Here</p>
+                <p className="text-sm text-slate-400">It seems there aren&apos;t any tasks in this list</p>
+              </div>
+            ) : (
+              <div className="divide-y divide-slate-100">
+                {filtered.map((t) => {
+                  const quad = priorityQuadrant(t.urgent, t.important);
+                  const done = t.checklistItems.filter((c) => c.done).length;
+                  return (
+                    <div key={t.id} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-3">
+                      <div className="grid h-8 w-8 shrink-0 place-items-center rounded-full bg-slate-200 text-[11px] font-semibold text-slate-700">
+                        {t.assignee.name.split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <TaskLink taskId={t.id} className="truncate text-sm font-medium text-slate-900 hover:text-blue-600 hover:underline">{t.title}</TaskLink>
+                        <div className="text-xs text-slate-500">
+                          → {t.assignee.name}
+                          {t.kpiTemplate && <> · {t.kpiTemplate.kpiName}</>}
+                          {t.dueAt && <> · due {t.dueAt.toLocaleDateString()}</>}
+                          {t.checklistItems.length > 0 && <> · ☑ {done}/{t.checklistItems.length}</>}
+                        </div>
+                      </div>
+                      <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", STATUS_TONE[t.status])}>
+                        {TASK_STATUS_LABEL[t.status] ?? t.status}
+                      </span>
+                      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">{quad}</span>
+                      <ExchangeControl taskId={t.id} currentAssigneeId={t.assigneeId} members={memberPeople} />
                     </div>
+                  );
+                })}
+              </div>
+            )}
+          </Card>
+        </>
+      ) : (
+        <Card>
+          <SectionTitle>Group Announcements</SectionTitle>
+          <div className="space-y-4">
+            {canManage && (
+              <form action={createGroupAnnouncement} className="flex gap-2">
+                <input type="hidden" name="groupId" value={group.id} />
+                <input
+                  name="body"
+                  required
+                  placeholder="Post an announcement to this group..."
+                  className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-emerald-500"
+                />
+                <button
+                  type="submit"
+                  className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                >
+                  Post
+                </button>
+              </form>
+            )}
+
+            {announcements.length === 0 ? (
+              <p className="text-sm text-slate-400">No announcements yet.</p>
+            ) : (
+              <div className="space-y-2">
+                {announcements.map((ann) => (
+                  <div key={ann.id} className="flex items-start justify-between rounded-lg border border-slate-100 bg-slate-50/50 p-3">
+                    <div className="space-y-1">
+                      <p className="text-sm text-slate-800 whitespace-pre-wrap">{ann.body}</p>
+                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                        <span className="font-medium text-slate-500">{ann.authorName}</span>
+                        <span>·</span>
+                        <span>{ann.createdAt.toLocaleString()}</span>
+                      </div>
+                    </div>
+                    {(ann.authorId === user.id || canManage) && (
+                      <DeleteAnnouncementButton annId={ann.id} groupId={group.id} />
+                    )}
                   </div>
-                  <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", STATUS_TONE[t.status])}>
-                    {TASK_STATUS_LABEL[t.status] ?? t.status}
-                  </span>
-                  <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-500">{quad}</span>
-                  <ExchangeControl taskId={t.id} currentAssigneeId={t.assigneeId} members={memberPeople} />
-                </div>
-              );
-            })}
+                ))}
+              </div>
+            )}
           </div>
-        )}
-      </Card>
+        </Card>
+      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertTriangle } from "lucide-react";
 import { moveTask } from "@/lib/actions/tasks";
 import { TASK_STATUS_LABEL } from "@/lib/constants";
+import { useTaskDrawer } from "../_components/TaskDrawerContext";
 
 const OPTIONS = [
   "NEW",
@@ -30,6 +31,7 @@ export default function MoveControl({
   const selectRef = useRef<HTMLSelectElement>(null);
   const [, startTransition] = useTransition();
   const router = useRouter();
+  const ctx = useTaskDrawer();
 
   // Modal state for reason prompts
   const [modal, setModal] = useState<{
@@ -55,6 +57,7 @@ export default function MoveControl({
         setTimeout(() => setErrorMsg(null), 4000);
         return;
       }
+      ctx?.refresh();
       router.refresh();
     });
   }

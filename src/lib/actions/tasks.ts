@@ -34,78 +34,89 @@ export async function createTask(formData: FormData) {
     groupMemberIds = membersSnap.docs ? membersSnap.docs.map((doc: any) => doc.data().employeeId) : [];
   }
   
-  const allWatcherIds = Array.from(new Set([...watcherIds, ...groupMemberIds])).filter((id) => id !== assigneeId);
   const now = new Date();
+  
+  const assignees = (assigneeId === "ALL_MEMBERS" && groupMemberIds.length > 0)
+    ? groupMemberIds
+    : [assigneeId];
 
-  // Create task in Firestore
-  const taskRef = await adminDb.collection("Task").add({
-    title,
-    description: String(formData.get("description") || "") || null,
-    creatorId: user.id,
-    assigneeId,
-    kpiTemplateId,
-    sizeLabel,
-    estimatedMins,
-    dueAt,
-    urgent,
-    important,
-    reviewRequired,
-    reviewerId: reviewRequired ? user.reportsToId : null,
-    status: "NEW",
-    category,
-    groupId,
-    carryCount: 0,
-    reworkCount: 0,
-    deletedAt: null,   // must be explicit null for Firestore equality queries
-    createdAt: now,
-    updatedAt: now,
-  });
+  let firstId = null;
 
-  // Create checklist items
-  if (checklist.length > 0) {
-    const batch = adminDb.batch();
-    checklist.forEach((text, i) => {
-      const itemRef = adminDb.collection("ChecklistItem").doc();
-      batch.set(itemRef, {
-        taskId: taskRef.id,
-        text,
-        orderIndex: i,
-        done: false,
-        createdAt: now,
-      });
+  for (const targetAssigneeId of assignees) {
+    const allWatcherIds = Array.from(new Set([...watcherIds, ...groupMemberIds])).filter((id) => id !== targetAssigneeId);
+
+    // Create task in Firestore
+    const taskRef = await adminDb.collection("Task").add({
+      title,
+      description: String(formData.get("description") || "") || null,
+      creatorId: user.id,
+      assigneeId: targetAssigneeId,
+      kpiTemplateId,
+      sizeLabel,
+      estimatedMins,
+      dueAt,
+      urgent,
+      important,
+      reviewRequired,
+      reviewerId: reviewRequired ? user.reportsToId : null,
+      status: "NEW",
+      category,
+      groupId,
+      carryCount: 0,
+      reworkCount: 0,
+      deletedAt: null,   // must be explicit null for Firestore equality queries
+      createdAt: now,
+      updatedAt: now,
     });
-    await batch.commit();
-  }
 
-  // Create watchers
-  if (allWatcherIds.length > 0) {
-    const batch = adminDb.batch();
-    allWatcherIds.forEach((employeeId) => {
-      const watcherRef = adminDb.collection("TaskWatcher").doc();
-      batch.set(watcherRef, {
-        taskId: taskRef.id,
-        employeeId,
-        notified: false,
-        createdAt: now,
+    if (!firstId) firstId = taskRef.id;
+
+    // Create checklist items
+    if (checklist.length > 0) {
+      const batch = adminDb.batch();
+      checklist.forEach((text, i) => {
+        const itemRef = adminDb.collection("ChecklistItem").doc();
+        batch.set(itemRef, {
+          taskId: taskRef.id,
+          text,
+          orderIndex: i,
+          done: false,
+          createdAt: now,
+        });
       });
-    });
-    await batch.commit();
-  }
+      await batch.commit();
+    }
 
-  await adminDb.collection("AuditLog").add({
-    actorId: user.id,
-    action: "task.create",
-    entity: "Task",
-    entityId: taskRef.id,
-    detail: title,
-    createdAt: now,
-  });
+    // Create watchers
+    if (allWatcherIds.length > 0) {
+      const batch = adminDb.batch();
+      allWatcherIds.forEach((employeeId) => {
+        const watcherRef = adminDb.collection("TaskWatcher").doc();
+        batch.set(watcherRef, {
+          taskId: taskRef.id,
+          employeeId,
+          notified: false,
+          createdAt: now,
+        });
+      });
+      await batch.commit();
+    }
+
+    await adminDb.collection("AuditLog").add({
+      actorId: user.id,
+      action: "task.create",
+      entity: "Task",
+      entityId: taskRef.id,
+      detail: title,
+      createdAt: now,
+    });
+  }
 
   revalidatePath("/board");
   revalidatePath("/team");
   revalidatePath("/delegated");
   if (groupId) revalidatePath(`/groups/${groupId}`);
-  return { ok: true, id: taskRef.id };
+  return { ok: true, id: firstId };
 }
 
 export async function updateTask(formData: FormData) {
