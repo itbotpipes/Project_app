@@ -42,9 +42,10 @@ export default async function AppLayout({
             </div>
           </div>
           <Sidebar
-            showManager={isManagerLike(user.systemRole)}
-            showAdmin={user.systemRole === "ADMIN" || user.systemRole === "CEO"}
-            showScoring={canScoreCompanyWide(user)}
+            userPermissions={user.role?.permissions || null}
+            systemRole={user.systemRole}
+            isManager={isManagerLike(user.systemRole)}
+            canScore={canScoreCompanyWide(user)}
           />
         </aside>
 

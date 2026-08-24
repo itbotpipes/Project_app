@@ -8,22 +8,22 @@ import type { TaskDetailData } from "@/lib/taskDetail";
 
 export default function TaskDrawerHost() {
   const ctx = useTaskDrawer();
-  const [data, setData] = useState<NonNullable<TaskDetailData> | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const openTaskId = ctx?.openTaskId ?? null;
+  const setTaskData = ctx?.setTaskData;
 
   useEffect(() => {
-    if (!openTaskId) {
-      setData(null);
+    if (!openTaskId || !setTaskData) {
+      setTaskData?.(null);
       setError(null);
       return;
     }
     let cancelled = false;
     setLoading(true);
     setError(null);
-    setData(null);
+    setTaskData(null);
 
     fetch(`/api/tasks/${openTaskId}`, { cache: "no-store" })
       .then(async (res) => {
@@ -34,7 +34,7 @@ export default function TaskDrawerHost() {
         return res.json();
       })
       .then((json) => {
-        if (!cancelled) setData(json);
+        if (!cancelled) setTaskData(json);
       })
       .catch((e: Error) => {
         if (!cancelled) setError(e.message || "Something went wrong loading this task.");
@@ -46,7 +46,7 @@ export default function TaskDrawerHost() {
     return () => {
       cancelled = true;
     };
-  }, [openTaskId, ctx?.refreshTrigger]);
+  }, [openTaskId, ctx?.refreshTrigger, setTaskData]);
 
   if (!ctx || !openTaskId) return null;
 
@@ -58,7 +58,7 @@ export default function TaskDrawerHost() {
       {error && (
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 text-sm text-red-700">{error}</div>
       )}
-      {data && <TaskFields data={data} />}
+      {ctx.taskData && <TaskFields data={ctx.taskData} />}
     </TaskDrawer>
   );
 }

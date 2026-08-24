@@ -4,6 +4,37 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import bcrypt from "bcryptjs";
+import { v2 as cloudinary } from "cloudinary";
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
+
+async function uploadAvatarToCloudinary(file: File): Promise<string | null> {
+  if (!file || file.size === 0) return null;
+  try {
+    const bytes = Buffer.from(await file.arrayBuffer());
+    const uploadResult = await new Promise((resolve, reject) => {
+      const uploadStream = cloudinary.uploader.upload_stream(
+        { 
+          folder: "taskflow_avatars", 
+          resource_type: "image",
+        },
+        (error, result) => {
+          if (error) reject(error);
+          else resolve(result);
+        }
+      );
+      uploadStream.end(bytes);
+    }) as any;
+    return uploadResult.secure_url;
+  } catch (err) {
+    console.error("Avatar upload failed:", err);
+    return null;
+  }
+}
 
 async function hashPassword(pw: string) {
   return bcrypt.hash(pw, 10);
@@ -25,11 +56,17 @@ export async function createEmployee(formData: FormData) {
   const reportsToId = String(formData.get("reportsToId") || "") || null;
   const systemRole = String(formData.get("systemRole") || "EMPLOYEE");
   const bday = String(formData.get("birthday") || "");
-  const password = String(formData.get("password") || "password123");
+  const password = String(formData.get("password") || "").trim() || "password123";
   if (!name || !email || !roleId) return { error: "Name, email and role are required" };
 
   const existsSnap = await adminDb.collection("Employee").where("email", "==", email).limit(1).get();
   if (!existsSnap.empty) return { error: "That email already exists" };
+
+  const avatarFile = formData.get("avatarFile") as File | null;
+  let avatarUrl: string | null = null;
+  if (avatarFile && avatarFile.size > 0) {
+    avatarUrl = await uploadAvatarToCloudinary(avatarFile);
+  }
 
   const passwordHash = await hashPassword(password);
   
@@ -41,6 +78,7 @@ export async function createEmployee(formData: FormData) {
     systemRole,
     birthday: bday ? new Date(bday) : null,
     passwordHash,
+    avatarUrl,
     active: true,
     joinedAt: new Date(),
   });
@@ -152,4 +190,100 @@ export async function deleteKpiTemplate(formData: FormData) {
   await adminDb.collection("KpiTemplate").doc(id).delete();
   
   revalidatePath("/admin");
+}
+
+export async function createRole(formData: FormData) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const title = String(formData.get("title") || "").trim();
+  const level = Number(formData.get("level") || 5);
+  const departmentId = String(formData.get("departmentId") || "") || null;
+  const permissions = formData.getAll("permissions").map(String);
+
+  if (!title) return { error: "Title is required" };
+
+  await adminDb.collection("Role").add({
+    title,
+    level,
+    departmentId,
+    permissions,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+export async function updateRolePermissions(formData: FormData) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const roleId = String(formData.get("roleId") || "");
+  const permissions = formData.getAll("permissions").map(String);
+
+  if (!roleId) return { error: "Role ID is required" };
+
+  await adminDb.collection("Role").doc(roleId).update({
+    permissions,
+    updatedAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+export async function updateEmployee(formData: FormData) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const id = String(formData.get("id") || "");
+  const name = String(formData.get("name") || "").trim();
+  const email = String(formData.get("email") || "").trim().toLowerCase();
+  const roleId = String(formData.get("roleId") || "");
+  const reportsToId = String(formData.get("reportsToId") || "") || null;
+  const systemRole = String(formData.get("systemRole") || "EMPLOYEE");
+  const bday = String(formData.get("birthday") || "");
+  const password = String(formData.get("password") || "");
+
+  if (!id || !name || !email || !roleId) {
+    return { error: "ID, name, email and role are required" };
+  }
+
+  const updates: any = {
+    name,
+    email,
+    roleId,
+    reportsToId,
+    systemRole,
+    birthday: bday ? new Date(bday) : null,
+    updatedAt: new Date()
+  };
+
+  const avatarFile = formData.get("avatarFile") as File | null;
+  if (avatarFile && avatarFile.size > 0) {
+    const avatarUrl = await uploadAvatarToCloudinary(avatarFile);
+    if (avatarUrl) {
+      updates.avatarUrl = avatarUrl;
+    }
+  }
+
+  if (password) {
+    updates.passwordHash = await hashPassword(password);
+  }
+
+  await adminDb.collection("Employee").doc(id).update(updates);
+
+  await adminDb.collection("AuditLog").add({
+    actorId: admin.id,
+    action: "employee.update",
+    entity: "Employee",
+    entityId: id,
+    detail: `${name} <${email}>`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/people");
+  return { ok: true };
 }

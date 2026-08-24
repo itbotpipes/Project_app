@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
+import { getCurrentUser, isManagerLike, canScoreCompanyWide, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { monthStartOf, previousMonthStart } from "@/lib/date";
 import { computeAutoScores } from "@/lib/autoscore";
@@ -14,10 +14,11 @@ export default async function ScoresPage({
   searchParams: Promise<{ date?: string }>;
 }) {
   const user = await getCurrentUser();
-  if (!user) return null;
-  const companyWide = canScoreCompanyWide(user);
-  const manager = isManagerLike(user.systemRole);
-  if (!companyWide && !manager) redirect("/");
+  if (!hasPermission(user, "people")) redirect("/");
+
+  const companyWide = hasPermission(user, "scores");
+  const manager = hasPermission(user, "team") || isManagerLike(user.systemRole);
+  const isEmployee = !companyWide && !manager;
 
   const sp = await searchParams;
   const periodStart = sp.date ? monthStartOf(new Date(sp.date)) : previousMonthStart();
@@ -28,7 +29,7 @@ export default async function ScoresPage({
   const monthLabel = periodStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" });
 
   let employeesSnap;
-  if (companyWide) {
+  if (companyWide || isEmployee) {
     employeesSnap = await cachedFetch(
       'active-employees',
       () => adminDb.collection("Employee").where("active", "==", true).get(),
@@ -43,11 +44,13 @@ export default async function ScoresPage({
     return { id: doc.id, ...emp, role: null };
   }) : [];
   
-  // Batch fetch roles and departments
-  const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))];
-  const [rolesMap, departmentsMap] = await Promise.all([
+  // Batch fetch roles, departments, and managers
+  const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))] as string[];
+  const managerIds = [...new Set(employees.map((e) => e.reportsToId).filter(Boolean))] as string[];
+  const [rolesMap, departmentsMap, managersMap] = await Promise.all([
     batchFetchByIds('Role', roleIds, adminDb),
     fetchAllDepartments(adminDb),
+    batchFetchByIds('Employee', managerIds, adminDb),
   ]);
   
   // Build department name map
@@ -56,7 +59,7 @@ export default async function ScoresPage({
     deptNameById.set(d.id, d.data().name);
   });
   
-  // Attach role and department data to employees
+  // Attach role, department, and reportsToName data to employees
   employees.forEach((e: any) => {
     const role = e.roleId ? (rolesMap.get(e.roleId) as any) : null;
     e.role = role 
@@ -66,6 +69,9 @@ export default async function ScoresPage({
           department: role.departmentId ? { name: deptNameById.get(role.departmentId) ?? "Other" } : null 
         }
       : { title: "Unknown", department: null };
+      
+    const managerObj = e.reportsToId ? (managersMap.get(e.reportsToId) as any) : null;
+    e.reportsToName = managerObj?.name ?? "—";
   });
   
   employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
@@ -156,11 +162,13 @@ export default async function ScoresPage({
   return (
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Performance Scoring Panel</h1>
+        <h1 className="text-2xl font-semibold">
+          {isEmployee ? "Company Directory" : "Directory & Performance Scoring"}
+        </h1>
         <p className="text-sm text-slate-500">
-          Each KPI is scored <strong>automatically</strong> from the employee&apos;s tasks
-          (completion, consistency, no rework). You review and adjust each one — the total rolls up
-          to their scorecard and shows on their Performance panel.
+          {isEmployee
+            ? `${employees.length} people across the company and their latest performance scores.`
+            : "Review active members' profiles and update/override their automatically calculated KPI scores."}
         </p>
       </div>
 
@@ -214,15 +222,53 @@ export default async function ScoresPage({
               const review = reviewMap.get(e.id);
               const bh = behaviourMap.get(e.id);
 
-              return (
-                <details key={e.id} className="rounded-xl border border-slate-200">
-                  <summary className="flex cursor-pointer flex-wrap items-center gap-3 p-3">
+              const initials = (e.name || "U").split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase();
+
+              if (isEmployee) {
+                return (
+                  <div key={e.id} className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-100 bg-white p-3 shadow-sm hover:border-slate-200 transition-all">
                     <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
-                      {(e.name || "U").split(" ").map((p: string) => p[0]).slice(0, 2).join("").toUpperCase()}
+                      {initials}
                     </div>
                     <div className="min-w-[9rem]">
-                      <div className="text-sm font-medium">{e.name}</div>
+                      <div className="text-sm font-semibold text-slate-800">{e.name}</div>
                       <div className="text-xs text-slate-500">{e.role.title}</div>
+                    </div>
+                    <div className="min-w-[10rem]">
+                      <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-bold">Reports To</span>
+                      <span className="text-xs text-slate-600 font-medium">{e.reportsToName}</span>
+                    </div>
+                    <div className="ml-auto flex items-center gap-3">
+                      <Badge className={anySaved ? "bg-violet-100 text-violet-700" : "bg-slate-100 text-slate-400"} title="Final score for the month">
+                        Score: {Math.round(finalTotal)}
+                      </Badge>
+                      {e.id === user.id && (
+                        <Link
+                          href="/performance"
+                          className="rounded-full border border-slate-200 bg-white px-3 py-1 text-xs text-blue-600 hover:bg-blue-50 font-medium transition"
+                        >
+                          My Profile
+                        </Link>
+                      )}
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <details key={e.id} className="rounded-xl border border-slate-200 bg-white">
+                  <summary className="flex cursor-pointer flex-wrap items-center gap-3 p-3 select-none">
+                    <div className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-slate-200 text-xs font-semibold text-slate-700">
+                      {initials}
+                    </div>
+                    <div className="min-w-[9rem]">
+                      <div className="text-sm font-medium hover:text-blue-600 hover:underline">
+                        <Link href={`/people/${e.id}`}>
+                          {e.name}
+                        </Link>
+                      </div>
+                      <div className="text-xs text-slate-500">{e.role.title}</div>
+                      <div className="text-[10px] text-slate-400">Reports to: {e.reportsToName}</div>
                     </div>
                     <div className="ml-auto flex items-center gap-2">
                       <Badge className="bg-blue-50 text-blue-700" title="System auto total">

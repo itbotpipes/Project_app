@@ -133,6 +133,14 @@
       ]
     },
     {
+      "collectionGroup": "MonthlyScorecard",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "year", "order": "DESCENDING" },
+        { "fieldPath": "month", "order": "DESCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "YearlyReview",
       "queryScope": "COLLECTION",
       "fields": [

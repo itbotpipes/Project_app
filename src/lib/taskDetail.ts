@@ -78,11 +78,33 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   const commentAuthorIds = commentsSnap.docs ? commentsSnap.docs.map((c: any) => c.data().authorId).filter(Boolean) as string[] : [];
   const commentAuthorsMap = await batchFetchByIds('Employee', commentAuthorIds, adminDb);
   
-  const comments = commentsSnap.docs ? commentsSnap.docs.map((c) => {
+  const commentsRaw = commentsSnap.docs ? commentsSnap.docs.map((c) => {
     const d = c.data();
     const author = commentAuthorsMap.get(d.authorId) as any;
-    return { id: c.id, body: d.body, createdAt: toISOSafe(d.createdAt), author: { name: author?.name ?? "", avatarUrl: author?.avatarUrl ?? null } };
+    return { 
+      id: c.id, 
+      body: d.body, 
+      createdAt: toISOSafe(d.createdAt), 
+      parentId: d.parentId || null,
+      author: { name: author?.name ?? "", avatarUrl: author?.avatarUrl ?? null } 
+    };
   }) : [];
+
+  const commentsMap = new Map<string, any>();
+  const comments: any[] = [];
+
+  commentsRaw.forEach((c) => {
+    commentsMap.set(c.id, { ...c, replies: [] });
+  });
+
+  commentsRaw.forEach((c) => {
+    const mapped = commentsMap.get(c.id);
+    if (c.parentId && commentsMap.has(c.parentId)) {
+      commentsMap.get(c.parentId).replies.push(mapped);
+    } else {
+      comments.push(mapped);
+    }
+  });
 
   // Batch fetch watcher employee data
   const watcherEmployeeIds = watchersSnap.docs ? watchersSnap.docs.map((w: any) => w.data().employeeId).filter(Boolean) as string[] : [];
@@ -162,6 +184,9 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     reminders: remindersSnap.docs ? remindersSnap.docs.map((r) => ({ id: r.id, remindAt: toISOSafe(r.data().remindAt), sent: r.data().sent })) : [],
     attachments: attachmentsSnap.docs ? attachmentsSnap.docs.map((a) => ({ id: a.id, kind: a.data().kind, url: a.data().url, filename: a.data().filename })) : [],
     comments,
+    commentsCount: commentsRaw.length,
     activity,
+    lastStatusChange: toISOSafe(task.lastStatusChange) || toISOSafe(task.createdAt),
+    statusDurations: (task.statusDurations || {}) as Record<string, number>,
   };
 }

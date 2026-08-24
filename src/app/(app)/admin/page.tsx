@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { setEmployeeActive, setEmployeeAvatar } from "@/lib/actions/admin";
 import { deleteTemplate } from "@/lib/actions/templates";
@@ -8,6 +8,8 @@ import { Card, SectionTitle, Badge } from "../_components/ui";
 import Avatar from "../_components/Avatar";
 import NewEmployeeForm from "./NewEmployeeForm";
 import KpiManager from "./KpiManager";
+import RoleManager from "./RoleManager";
+import EditEmployeeDialog from "./EditEmployeeDialog";
 import CreateTemplateDialog from "../templates/CreateTemplateDialog";
 import TaskLink from "../_components/TaskLink";
 
@@ -20,19 +22,31 @@ function toDate(val: any): Date {
 export default async function AdminPage() {
   const user = await getCurrentUser();
   if (!user) return null;
-  if (!(user.systemRole === "ADMIN" || user.systemRole === "CEO")) redirect("/");
+  if (!hasPermission(user, "admin")) redirect("/");
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const [rolesSnap, employeesSnap, kpisSnap, staleTasksSnap, templatesSnap] = await Promise.all([
+  const [rolesSnap, employeesSnap, kpisSnap, staleTasksSnap, templatesSnap, departmentsSnap] = await Promise.all([
     adminDb.collection("Role").orderBy("level", "asc").get(),
     adminDb.collection("Employee").orderBy("name", "asc").get(),
     adminDb.collection("KpiTemplate").get(),
     adminDb.collection("Task").where("status", "!=", "CLOSED").get(),
     adminDb.collection("TaskTemplate").get(),
+    adminDb.collection("Department").get(),
   ]);
 
-  const roles = rolesSnap.docs.map((d) => ({ id: d.id, ...d.data() })) as any[];
+  const roles = rolesSnap.docs.map((d) => {
+    const data = d.data() as any;
+    const serialized: any = { id: d.id };
+    for (const [key, value] of Object.entries(data)) {
+      if (value && typeof value === 'object' && 'toDate' in value) {
+        serialized[key] = (value as any).toDate().toISOString();
+      } else {
+        serialized[key] = value;
+      }
+    }
+    return serialized;
+  }) as any[];
   const kpis = kpisSnap.docs
     .sort((a, b) => (a.data().roleId ?? "").localeCompare(b.data().roleId ?? "") || (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
     .map((d) => ({ id: d.id, ...d.data() })) as any[];
@@ -116,8 +130,8 @@ export default async function AdminPage() {
                 <th className="pb-2 font-medium">Name</th>
                 <th className="pb-2 font-medium">Role</th>
                 <th className="pb-2 font-medium">Access</th>
-                <th className="pb-2 font-medium">Photo URL (leaderboard highlight)</th>
                 <th className="pb-2 font-medium text-right">Status</th>
+                <th className="pb-2 font-medium text-right">Actions</th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -127,13 +141,6 @@ export default async function AdminPage() {
                   <td className="py-2 font-medium">{e.name}</td>
                   <td className="py-2 text-slate-600">{e.role.title}</td>
                   <td className="py-2"><Badge className="bg-slate-100 text-slate-600">{e.systemRole}</Badge></td>
-                  <td className="py-2">
-                    <form action={setEmployeeAvatar} className="flex items-center gap-1">
-                      <input type="hidden" name="id" value={e.id} />
-                      <input name="avatarUrl" defaultValue={e.avatarUrl ?? ""} placeholder="https://…" className="w-40 rounded-md border border-slate-300 px-1.5 py-1 text-xs" />
-                      <button className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100">Save</button>
-                    </form>
-                  </td>
                   <td className="py-2 text-right">
                     <form action={setEmployeeActive} className="inline">
                       <input type="hidden" name="id" value={e.id} />
@@ -143,11 +150,33 @@ export default async function AdminPage() {
                       </button>
                     </form>
                   </td>
+                  <td className="py-2 text-right">
+                    <EditEmployeeDialog
+                      employee={{
+                        id: e.id,
+                        name: e.name,
+                        email: e.email,
+                        roleId: e.roleId,
+                        reportsToId: e.reportsToId || null,
+                        systemRole: e.systemRole,
+                        birthday: e.birthday ? (e.birthday.toDate ? e.birthday.toDate().toISOString() : new Date(e.birthday).toISOString()) : null,
+                      }}
+                      roles={roleOpts}
+                      managers={managerOpts}
+                    />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
+      </Card>
+
+      <Card>
+        <RoleManager
+          roles={roles}
+          departments={departmentsSnap.docs.map((d: any) => ({ id: d.id, name: d.data().name }))}
+        />
       </Card>
 
       {staleTasks.length > 0 && (

@@ -64,8 +64,16 @@ export default function NewEmployeeForm({
             </select>
           </label>
           <label className="text-xs font-medium text-slate-600">
+            Password
+            <input name="password" type="password" placeholder="Password (default: password123)" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm" />
+          </label>
+          <label className="text-xs font-medium text-slate-600">
             Birthday
             <input name="birthday" type="date" className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm" />
+          </label>
+          <label className="text-xs font-medium text-slate-600 sm:col-span-2">
+            Profile Photo
+            <input name="avatarFile" type="file" accept="image/*" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-sm" />
           </label>
           <div className="sm:col-span-2 flex items-center gap-3">
             <button className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700">

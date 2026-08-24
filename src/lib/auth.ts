@@ -128,3 +128,26 @@ export function canScoreCompanyWide(user: ScoringUser) {
     user.role.title.toLowerCase().includes("hr")
   );
 }
+
+export function hasPermission(user: any, permission: string): boolean {
+  if (!user) return false;
+  
+  if (user.role?.permissions) {
+    return user.role.permissions.includes(permission);
+  }
+  
+  // Fallbacks using legacy rules
+  switch (permission) {
+    case "admin":
+      return user.systemRole === "ADMIN" || user.systemRole === "CEO";
+    case "delegated":
+    case "team":
+    case "people":
+      return isManagerLike(user.systemRole);
+    case "scores":
+    case "announcements":
+      return canScoreCompanyWide(user);
+    default:
+      return true;
+  }
+}

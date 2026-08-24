@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition, useEffect } from "react";
+import { useState, useTransition, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { Trash2, AlertTriangle } from "lucide-react";
 import { moveTask, softDeleteTask } from "@/lib/actions/tasks";
@@ -65,6 +65,27 @@ export default function KanbanBoard({
   const [overCol, setOverCol] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
   const router = useRouter();
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+
+  function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    const { clientX } = e;
+    const { left, right } = container.getBoundingClientRect();
+
+    const edgeSize = 120; // Scrolling activation zone width
+    const maxSpeed = 16;  // Max scrolling velocity
+
+    if (clientX < left + edgeSize) {
+      const ratio = (left + edgeSize - clientX) / edgeSize;
+      container.scrollLeft -= ratio * maxSpeed;
+    } else if (clientX > right - edgeSize) {
+      const ratio = (clientX - (right - edgeSize)) / edgeSize;
+      container.scrollLeft += ratio * maxSpeed;
+    }
+  }
 
   // Hold-reason modal state
   const [holdModal, setHoldModal] = useState<{ taskId: string; newStatus: string } | null>(null);
@@ -155,7 +176,11 @@ export default function KanbanBoard({
 
   return (
     <>
-      <div className="flex gap-4 overflow-x-auto scroll-thin pb-4">
+      <div
+        ref={scrollContainerRef}
+        onDragOver={handleDragOver}
+        className="flex gap-4 overflow-x-auto scroll-thin pb-4"
+      >
         {columns.map((status) => (
         <div
           key={status}

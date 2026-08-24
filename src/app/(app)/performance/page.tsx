@@ -18,7 +18,11 @@ export default async function PerformancePage() {
     reportsSnap
   ] = await Promise.all([
     loadEmployeePerformance(user.id),
-    adminDb.collection("MonthlyScorecard").get(),
+    adminDb.collection("MonthlyScorecard")
+      .orderBy("year", "desc")
+      .orderBy("month", "desc")
+      .limit(1)
+      .get(),
     manager ? adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get() : Promise.resolve(null)
   ]);
 

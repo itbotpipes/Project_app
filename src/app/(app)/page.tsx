@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
+import { redirect } from "next/navigation";
+import { getCurrentUser, isManagerLike, canScoreCompanyWide, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
@@ -25,6 +26,15 @@ function toDate(val: any): Date | null {
 export default async function Dashboard() {
   const user = await getCurrentUser();
   if (!user) return null; // layout redirects unauthenticated users
+
+  if (!hasPermission(user, "dashboard")) {
+    if (hasPermission(user, "board")) {
+      redirect("/board");
+    } else {
+      redirect("/performance");
+    }
+  }
+
   const manager = isManagerLike(user.systemRole);
   const scorer = canScoreCompanyWide(user);
 
@@ -381,15 +391,50 @@ export default async function Dashboard() {
               {thought?.body ?? <span className="text-slate-400">No thought set yet — click Edit to add one.</span>}
             </p>
             {notices.length > 0 && (
-              <ul className="mt-4 space-y-2 border-t border-blue-100 pt-3">
-                {notices.map((n) => (
-                  <li key={n.id} className="text-sm">
-                    <span className="mr-1">📌</span>
-                    {n.title && <span className="font-medium">{n.title}: </span>}
-                    <span className="text-slate-600">{n.body}</span>
-                  </li>
-                ))}
-              </ul>
+              <div className="mt-5 space-y-3 border-t border-blue-100 pt-4">
+                <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400">
+                  📢 Important Announcements
+                </div>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {notices.map((n) => (
+                    <div
+                      key={n.id}
+                      className="relative flex flex-col justify-between rounded-xl border border-slate-100 bg-white p-3.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                    >
+                      <div className="min-w-0">
+                        <div className="flex items-start justify-between gap-2">
+                          <h4 className="text-xs font-bold text-slate-800 truncate mb-1">
+                            {n.pinned && <span className="mr-1 text-amber-500">📌</span>}
+                            {n.title || "Announcement"}
+                          </h4>
+                          {n.pinned && (
+                            <span className="rounded bg-amber-50 px-1 py-0.5 text-[9px] font-medium text-amber-600">
+                              Pinned
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-600 leading-relaxed font-normal whitespace-pre-wrap mt-1">
+                          {n.body}
+                        </p>
+                      </div>
+                      
+                      <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-2 text-[10px] text-slate-400">
+                        <span className="font-semibold text-slate-500">
+                          By {n.author?.name || "Management"}
+                        </span>
+                        {n.createdAt && (
+                          <span>
+                            {new Date(n.createdAt.toDate ? n.createdAt.toDate() : n.createdAt).toLocaleDateString("en-IN", {
+                              day: "numeric",
+                              month: "short",
+                            })}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
             )}
             {thought && (
               <ThoughtSocial

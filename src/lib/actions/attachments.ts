@@ -17,28 +17,46 @@ export async function addComment(formData: FormData) {
   if (!user) return;
   const taskId = String(formData.get("taskId") || "");
   const body = String(formData.get("body") || "").trim();
+  const parentId = String(formData.get("parentId") || "").trim() || null;
   if (!taskId || !body) return;
   
   const now = new Date();
   
   // Save comment to Firestore
-  await adminDb.collection("TaskComment").add({
+  const docRef = await adminDb.collection("TaskComment").add({
     taskId,
     authorId: user.id,
     body,
     createdAt: now,
+    parentId,
   });
   
   // Save audit log to Firestore
   await adminDb.collection("AuditLog").add({
     actorId: user.id,
-    action: "task.comment",
+    action: parentId ? "task.reply" : "task.comment",
     entity: "Task",
     entityId: taskId,
     createdAt: now,
   });
+
+  const authorDoc = await adminDb.collection("Employee").doc(user.id).get();
+  const authorData = authorDoc.exists ? authorDoc.data() : null;
   
   revalidatePath(`/task/${taskId}`);
+  return {
+    ok: true,
+    comment: {
+      id: docRef.id,
+      body,
+      createdAt: now.toISOString(),
+      parentId,
+      author: {
+        name: authorData?.name ?? user.name ?? "",
+        avatarUrl: authorData?.avatarUrl ?? null
+      }
+    }
+  };
 }
 
 export async function createReminder(formData: FormData) {
@@ -105,10 +123,25 @@ export async function uploadTaskAttachment(formData: FormData) {
   try {
     const bytes = Buffer.from(await file.arrayBuffer());
     
+    // Determine dynamic resource_type for Cloudinary to avoid corruption of documents (e.g. PPT, PDF, DOCX)
+    const isImage = file.type.startsWith("image/");
+    const isAudioVideo = file.type.startsWith("audio/") || file.type.startsWith("video/");
+    const resourceType = isImage ? "image" : isAudioVideo ? "video" : "raw";
+
+    // Extract file extension to preserve in Cloudinary publicId (vital for raw documents like PPT, DOCX)
+    const lastDot = file.name.lastIndexOf(".");
+    const fileExtension = lastDot !== -1 ? file.name.substring(lastDot) : "";
+    const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    const publicId = `${uniqueId}${fileExtension}`;
+
     // Upload to Cloudinary using a promise wrapper
     const uploadResult = await new Promise((resolve, reject) => {
       const uploadStream = cloudinary.uploader.upload_stream(
-        { folder: "taskflow_uploads", resource_type: "auto" },
+        { 
+          folder: "taskflow_uploads", 
+          resource_type: resourceType,
+          public_id: publicId
+        },
         (error, result) => {
           if (error) reject(error);
           else resolve(result);
@@ -121,7 +154,7 @@ export async function uploadTaskAttachment(formData: FormData) {
     const now = new Date();
 
     // Save attachment to Firestore
-    await adminDb.collection("Attachment").add({
+    const docRef = await adminDb.collection("Attachment").add({
       taskId,
       kind,
       url: secureUrl,
@@ -139,9 +172,44 @@ export async function uploadTaskAttachment(formData: FormData) {
     });
     
     revalidatePath(`/task/${taskId}`);
-    return { ok: true };
+    return { 
+      ok: true,
+      attachment: {
+        id: docRef.id,
+        kind,
+        url: secureUrl,
+        filename: file.name || "upload"
+      }
+    };
   } catch (error) {
     console.error("Cloudinary upload error:", error);
     return { error: "Upload failed" };
   }
+}
+
+export async function deleteTaskAttachment(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not signed in" };
+  const id = String(formData.get("id") || "");
+  const taskId = String(formData.get("taskId") || "");
+  if (!id || !taskId) return { error: "Missing fields" };
+
+  const attachmentDoc = await adminDb.collection("Attachment").doc(id).get();
+  if (!attachmentDoc.exists) return { error: "Attachment not found" };
+
+  // Delete attachment from Firestore
+  await adminDb.collection("Attachment").doc(id).delete();
+
+  // Log audit trail
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "task.detach",
+    entity: "Task",
+    entityId: taskId,
+    detail: attachmentDoc.data()!.filename,
+    createdAt: new Date(),
+  });
+
+  revalidatePath(`/task/${taskId}`);
+  return { ok: true };
 }

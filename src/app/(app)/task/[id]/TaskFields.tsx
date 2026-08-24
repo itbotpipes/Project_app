@@ -9,10 +9,13 @@ import CommentForm from "./CommentForm";
 import Attachments from "./Attachments";
 import Reminders from "./Reminders";
 import Checklist from "./Checklist";
+import DeleteAttachmentButton from "./DeleteAttachmentButton";
 import WatchButton from "./WatchButton";
 import DeleteTaskButton from "./DeleteTaskButton";
 import EditTaskDialog from "./EditTaskDialog";
 import QuickActions from "./QuickActions";
+import CommentItem from "./CommentItem";
+import TaskTimer from "./TaskTimer";
 
 const STATUS_DOT: Record<string, string> = {
   NEW: "bg-slate-400",
@@ -152,6 +155,14 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
           )}
         </dl>
 
+        <div className="mt-5 border-t border-slate-100 pt-4">
+          <TaskTimer
+            status={task.status}
+            lastStatusChange={task.lastStatusChange}
+            statusDurations={task.statusDurations}
+          />
+        </div>
+
         {task.status === "ON_HOLD" && task.holdReason && (
           <div className="mt-4 rounded-lg bg-amber-50 px-3 py-2 text-sm text-amber-700">On hold: {task.holdReason}</div>
         )}
@@ -202,23 +213,26 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
         {task.attachments.length > 0 && (
           <ul className="mt-4 space-y-2">
             {task.attachments.map((a: any) => (
-              <li key={a.id} className="rounded-lg border border-slate-200 p-2">
-                {a.kind === "VOICE" ? (
-                  <div>
-                    <div className="mb-1 text-xs text-slate-500">🎤 Voice note</div>
-                    {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
-                    <audio controls src={a.url} className="w-full" />
-                  </div>
-                ) : a.kind === "PHOTO" || /\.(png|jpe?g|gif|webp)$/i.test(a.url) ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <a href={a.url} target="_blank" rel="noreferrer">
-                    <img src={a.url} alt={a.filename ?? "attachment"} className="max-h-48 rounded" />
-                  </a>
-                ) : (
-                  <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline">
-                    📎 {a.filename ?? a.url}
-                  </a>
-                )}
+              <li key={a.id} className="flex items-start justify-between gap-2 rounded-lg border border-slate-200 p-2">
+                <div className="min-w-0 flex-1">
+                  {a.kind === "VOICE" ? (
+                    <div>
+                      <div className="mb-1 text-xs text-slate-500">🎤 Voice note</div>
+                      {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
+                      <audio controls src={a.url} className="w-full" />
+                    </div>
+                  ) : a.kind === "PHOTO" || /\.(png|jpe?g|gif|webp)$/i.test(a.url) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <a href={a.url} target="_blank" rel="noreferrer">
+                      <img src={a.url} alt={a.filename ?? "attachment"} className="max-h-48 rounded" />
+                    </a>
+                  ) : (
+                    <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline truncate max-w-full">
+                      📎 {a.filename ?? a.url}
+                    </a>
+                  )}
+                </div>
+                <DeleteAttachmentButton attachmentId={a.id} taskId={task.id} filename={a.filename || "attachment"} />
               </li>
             ))}
           </ul>
@@ -226,19 +240,10 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
       </Card>
 
       <Card className="scroll-mt-4" id="comment-box">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Comments ({task.comments.length})</h2>
-        <div className="mb-4 space-y-3">
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Comments ({task.commentsCount ?? 0})</h2>
+        <div className="mb-4 space-y-4">
           {task.comments.map((c: any) => (
-            <div key={c.id} className="flex gap-3">
-              <Avatar name={c.author.name} url={c.author.avatarUrl} size={32} />
-              <div>
-                <div className="text-sm">
-                  <span className="font-medium">{c.author.name}</span>{" "}
-                  <span className="text-xs text-slate-400">{new Date(c.createdAt).toLocaleString()}</span>
-                </div>
-                <p className="text-sm text-slate-700">{c.body}</p>
-              </div>
-            </div>
+            <CommentItem key={c.id} comment={c} taskId={task.id} />
           ))}
           {!task.comments.length && <p className="text-sm text-slate-400">No comments yet.</p>}
         </div>

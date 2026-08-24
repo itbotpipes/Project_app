@@ -26,9 +26,15 @@ export default function Attachments({ taskId }: { taskId: string }) {
     const res = await uploadTaskAttachment(fd);
     setBusy(false);
     if (res?.error) setError(res.error);
-    else {
-      ctx?.refresh();
-      router.refresh();
+    else if (res?.attachment && ctx?.setTaskData) {
+      ctx.setTaskData((prev) =>
+        prev
+          ? {
+              ...prev,
+              attachments: [res.attachment, ...prev.attachments],
+            }
+          : null
+      );
     }
   }
 

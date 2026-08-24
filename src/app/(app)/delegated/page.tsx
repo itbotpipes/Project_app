@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser, isManagerLike } from "@/lib/auth";
+import { getCurrentUser, isManagerLike, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { TASK_STATUS_LABEL, priorityQuadrant } from "@/lib/constants";
 import { cn } from "@/lib/cn";
@@ -29,11 +29,14 @@ function toDate(val: any): Date | null {
 export default async function DelegatedTasksPage() {
   const user = await getCurrentUser();
   if (!user) return null;
-  if (!isManagerLike(user.systemRole)) redirect("/board");
+  if (!hasPermission(user, "delegated")) redirect("/board");
 
-  const [delegatedSnap, assignableSnap, kpiOptionsSnap] = await Promise.all([
+  const [creatorSnap, reviewerSnap, assignableSnap, kpiOptionsSnap] = await Promise.all([
     adminDb.collection("Task")
       .where("creatorId", "==", user.id)
+      .get(),
+    adminDb.collection("Task")
+      .where("reviewerId", "==", user.id)
       .get(),
     cachedFetch(
       'active-employees',
@@ -43,10 +46,14 @@ export default async function DelegatedTasksPage() {
     adminDb.collection("KpiTemplate").get(),
   ]);
 
-  // Filter out self-assigned and deleted tasks
-  const delegatedDocs = delegatedSnap.docs
-    ? delegatedSnap.docs.filter((d) => d.data().assigneeId !== user.id && !d.data().deletedAt)
-    : [];
+  // Merge and filter unique tasks where user is creator or reviewer, excluding self-assigned and deleted
+  const mergedDocsMap = new Map<string, any>();
+  creatorSnap.docs?.forEach((doc) => mergedDocsMap.set(doc.id, doc));
+  reviewerSnap.docs?.forEach((doc) => mergedDocsMap.set(doc.id, doc));
+
+  const delegatedDocs = Array.from(mergedDocsMap.values()).filter(
+    (d) => d.data().assigneeId !== user.id && !d.data().deletedAt
+  );
 
   // Batch fetch assignees and KPI templates
   const assigneeIds = delegatedDocs.map((d: any) => d.data().assigneeId).filter(Boolean) as string[];

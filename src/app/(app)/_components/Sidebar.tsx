@@ -25,35 +25,62 @@ import { cn } from "@/lib/cn";
 
 type Item = { href: string; label: string; icon: React.ElementType };
 
+function hasPermission(
+  permission: string,
+  userPermissions: string[] | null,
+  systemRole: string,
+  isManager: boolean,
+  canScore: boolean
+) {
+  if (userPermissions) {
+    return userPermissions.includes(permission);
+  }
+  // Fallbacks using legacy rules
+  switch (permission) {
+    case "admin":
+      return systemRole === "ADMIN" || systemRole === "CEO";
+    case "delegated":
+    case "team":
+    case "people":
+      return isManager;
+    case "scores":
+    case "announcements":
+      return canScore;
+    default:
+      return true;
+  }
+}
+
 export default function Sidebar({
-  showManager,
-  showAdmin,
-  showScoring,
+  userPermissions,
+  systemRole,
+  isManager,
+  canScore,
 }: {
-  showManager: boolean;
-  showAdmin: boolean;
-  showScoring: boolean;
+  userPermissions: string[] | null;
+  systemRole: string;
+  isManager: boolean;
+  canScore: boolean;
 }) {
   const pathname = usePathname();
 
   const items: Item[] = [
-    { href: "/", label: "Dashboard", icon: LayoutDashboard },
-    { href: "/board", label: "My Board", icon: KanbanSquare },
-    { href: "/groups", label: "Groups", icon: Users2 },
-    ...(showManager ? [{ href: "/delegated", label: "Delegated Tasks", icon: Share2 }] : []),
-    { href: "/subscribed", label: "Subscribed Tasks", icon: Bell },
-    { href: "/templates", label: "Task Templates", icon: BookmarkCheck },
-    { href: "/deleted", label: "Deleted Tasks", icon: Trash2 },
-    ...(showManager ? [{ href: "/team", label: "My Team", icon: Users }] : []),
-    { href: "/performance", label: "Performance", icon: TrendingUp },
-    { href: "/insights", label: "AI Insights", icon: Sparkles },
-    { href: "/org", label: "Org Chart", icon: Network },
-    ...(showScoring ? [{ href: "/scores", label: "Score Panel", icon: ClipboardCheck }] : []),
-    ...(showScoring ? [{ href: "/announcements", label: "Announcements", icon: Megaphone }] : []),
-    ...(showManager ? [{ href: "/people", label: "Directory", icon: Contact }] : []),
-    { href: "/leaderboard", label: "Leaderboard", icon: Trophy },
-    { href: "/activities", label: "Activities", icon: Activity },
-    ...(showAdmin ? [{ href: "/admin", label: "Admin", icon: Settings }] : []),
+    ...(hasPermission("dashboard", userPermissions, systemRole, isManager, canScore) ? [{ href: "/", label: "Dashboard", icon: LayoutDashboard }] : []),
+    ...(hasPermission("board", userPermissions, systemRole, isManager, canScore) ? [{ href: "/board", label: "My Board", icon: KanbanSquare }] : []),
+    ...(hasPermission("groups", userPermissions, systemRole, isManager, canScore) ? [{ href: "/groups", label: "Groups", icon: Users2 }] : []),
+    ...(hasPermission("delegated", userPermissions, systemRole, isManager, canScore) ? [{ href: "/delegated", label: "Delegated Tasks", icon: Share2 }] : []),
+    ...(hasPermission("subscribed", userPermissions, systemRole, isManager, canScore) ? [{ href: "/subscribed", label: "Subscribed Tasks", icon: Bell }] : []),
+    ...(hasPermission("templates", userPermissions, systemRole, isManager, canScore) ? [{ href: "/templates", label: "Task Templates", icon: BookmarkCheck }] : []),
+    ...(hasPermission("deleted", userPermissions, systemRole, isManager, canScore) ? [{ href: "/deleted", label: "Deleted Tasks", icon: Trash2 }] : []),
+    ...(hasPermission("team", userPermissions, systemRole, isManager, canScore) ? [{ href: "/team", label: "My Team", icon: Users }] : []),
+    ...(hasPermission("performance", userPermissions, systemRole, isManager, canScore) ? [{ href: "/performance", label: "Performance", icon: TrendingUp }] : []),
+    ...(hasPermission("insights", userPermissions, systemRole, isManager, canScore) ? [{ href: "/insights", label: "AI Insights", icon: Sparkles }] : []),
+    ...(hasPermission("org", userPermissions, systemRole, isManager, canScore) ? [{ href: "/org", label: "Org Chart", icon: Network }] : []),
+    ...(hasPermission("announcements", userPermissions, systemRole, isManager, canScore) ? [{ href: "/announcements", label: "Announcements", icon: Megaphone }] : []),
+    ...(hasPermission("people", userPermissions, systemRole, isManager, canScore) ? [{ href: "/scores", label: "Directory", icon: Contact }] : []),
+    ...(hasPermission("leaderboard", userPermissions, systemRole, isManager, canScore) ? [{ href: "/leaderboard", label: "Leaderboard", icon: Trophy }] : []),
+    ...(hasPermission("activities", userPermissions, systemRole, isManager, canScore) ? [{ href: "/activities", label: "Activities", icon: Activity }] : []),
+    ...(hasPermission("admin", userPermissions, systemRole, isManager, canScore) ? [{ href: "/admin", label: "Admin", icon: Settings }] : []),
   ];
 
   return (

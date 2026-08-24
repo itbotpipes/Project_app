@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { getCurrentUser, isManagerLike } from "@/lib/auth";
+import { getCurrentUser, isManagerLike, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel } from "@/lib/scores";
@@ -16,7 +16,7 @@ function toDate(val: any): Date | null {
 export default async function TeamPage() {
   const user = await getCurrentUser();
   if (!user) return null;
-  if (!isManagerLike(user.systemRole)) redirect("/");
+  if (!hasPermission(user, "team")) redirect("/");
 
   const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
   

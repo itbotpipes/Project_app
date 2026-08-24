@@ -4,7 +4,17 @@ import { useRef, useState } from "react";
 import { addComment } from "@/lib/actions/attachments";
 import { useTaskDrawer } from "../../_components/TaskDrawerContext";
 
-export default function CommentForm({ taskId }: { taskId: string }) {
+export default function CommentForm({ 
+  taskId, 
+  parentId, 
+  placeholder, 
+  onSuccess 
+}: { 
+  taskId: string; 
+  parentId?: string; 
+  placeholder?: string; 
+  onSuccess?: () => void;
+}) {
   const ref = useRef<HTMLFormElement>(null);
   const [busy, setBusy] = useState(false);
   const ctx = useTaskDrawer();
@@ -13,18 +23,52 @@ export default function CommentForm({ taskId }: { taskId: string }) {
       ref={ref}
       action={async (fd) => {
         setBusy(true);
-        await addComment(fd);
+        const res = await addComment(fd);
         ref.current?.reset();
         setBusy(false);
-        ctx?.refresh();
+        if (res?.comment && ctx?.setTaskData) {
+          ctx.setTaskData((prev) => {
+            if (!prev) return null;
+            
+            const insertReply = (commentsList: any[]): any[] => {
+              return commentsList.map(c => {
+                if (c.id === res.comment.parentId) {
+                  return {
+                    ...c,
+                    replies: [...(c.replies || []), { ...res.comment, replies: [] }]
+                  };
+                }
+                if (c.replies && c.replies.length > 0) {
+                  return {
+                    ...c,
+                    replies: insertReply(c.replies)
+                  };
+                }
+                return c;
+              });
+            };
+
+            const updatedComments = res.comment.parentId 
+              ? insertReply(prev.comments)
+              : [...prev.comments, { ...res.comment, replies: [] }];
+
+            return {
+              ...prev,
+              comments: updatedComments,
+              commentsCount: (prev.commentsCount || 0) + 1
+            };
+          });
+        }
+        if (onSuccess) onSuccess();
       }}
       className="flex gap-2"
     >
       <input type="hidden" name="taskId" value={taskId} />
+      {parentId && <input type="hidden" name="parentId" value={parentId} />}
       <input
         name="body"
         required
-        placeholder="Write a comment…"
+        placeholder={placeholder || "Write a comment…"}
         className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
       />
       <button

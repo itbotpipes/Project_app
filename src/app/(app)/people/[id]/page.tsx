@@ -1,7 +1,7 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
+import { getCurrentUser, isManagerLike, canScoreCompanyWide, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { monthLabel } from "@/lib/scores";
 import { loadEmployeePerformance } from "@/lib/employeePerformance";
@@ -13,7 +13,7 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
   const { id } = await params;
   const user = await getCurrentUser();
   if (!user) return null;
-  if (!isManagerLike(user.systemRole)) redirect("/");
+  if (!hasPermission(user, "people")) redirect("/");
 
   const empDoc = await adminDb.collection("Employee").doc(id).get();
   if (!empDoc.exists) notFound();

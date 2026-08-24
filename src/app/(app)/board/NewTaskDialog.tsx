@@ -45,6 +45,7 @@ export default function NewTaskDialog({
   const [category, setCategory] = useState("");
   const [assigneeId, setAssigneeId] = useState(selfId);
   const [priority, setPriority] = useState<"high" | "important-only" | "urgent-only" | "low">("low");
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const urgent = priority === "high" || priority === "urgent-only";
   const important = priority === "high" || priority === "important-only";
 
@@ -94,6 +95,7 @@ export default function NewTaskDialog({
     setChecklistDraft("");
     setShowLoop(false);
     setWatcherIds([]);
+    setErrorMsg(null);
   }
 
   return (
@@ -114,10 +116,36 @@ export default function NewTaskDialog({
             <h2 className="mb-3 text-lg font-semibold">Assign New Task</h2>
             <form
               action={async (fd) => {
+                const dueRaw = String(fd.get("dueAt") || "");
+                const estMins = Number(fd.get("estimatedMins") || 0);
+                
+                if (dueRaw) {
+                  const dueAtDate = new Date(dueRaw);
+                  const now = new Date();
+                  
+                  if (dueAtDate < now) {
+                    setErrorMsg("Deadline cannot be set before the current time.");
+                    return;
+                  }
+                  
+                  if (estMins > 0) {
+                    const minDue = new Date(now.getTime() + estMins * 60 * 1000);
+                    if (dueAtDate < minDue) {
+                      setErrorMsg(`Deadline must be at least ${estMins} minutes in the future (current time + estimated time).`);
+                      return;
+                    }
+                  }
+                }
+                
+                setErrorMsg(null);
                 if (groupId) fd.set("groupId", groupId);
-                await createTask(fd);
-                setOpen(false);
-                resetForm();
+                const res = await createTask(fd);
+                if (res?.error) {
+                  setErrorMsg(res.error);
+                } else {
+                  setOpen(false);
+                  resetForm();
+                }
               }}
               className="space-y-3"
             >
@@ -373,6 +401,11 @@ export default function NewTaskDialog({
                   <input type="checkbox" name="reviewRequired" /> Needs manager review
                 </label>
               </div>
+              {errorMsg && (
+                <div className="mt-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg p-2.5">
+                  ⚠️ {errorMsg}
+                </div>
+              )}
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"

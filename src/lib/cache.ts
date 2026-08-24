@@ -152,16 +152,16 @@ export async function batchFetchByIds<T>(
 ): Promise<Map<string, T>> {
   if (ids.length === 0) return new Map();
   
-  // Filter out any empty/undefined IDs
-  const validIds = ids.filter(id => id && typeof id === 'string');
-  if (validIds.length === 0) return new Map();
+  // Filter out any empty/undefined IDs and keep only unique values
+  const uniqueIds = Array.from(new Set(ids.filter(id => id && typeof id === 'string')));
+  if (uniqueIds.length === 0) return new Map();
   
   // Firebase Admin SDK v11+ supports up to 30 items in 'in' queries.
   // This project uses firebase-admin@^14, so we use 30 (was 10).
   const CHUNK_SIZE = 30;
   const chunks: string[][] = [];
-  for (let i = 0; i < validIds.length; i += CHUNK_SIZE) {
-    chunks.push(validIds.slice(i, i + CHUNK_SIZE));
+  for (let i = 0; i < uniqueIds.length; i += CHUNK_SIZE) {
+    chunks.push(uniqueIds.slice(i, i + CHUNK_SIZE));
   }
   
   const results = new Map<string, T>();

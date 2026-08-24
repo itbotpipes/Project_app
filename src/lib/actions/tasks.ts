@@ -35,6 +35,18 @@ export async function createTask(formData: FormData) {
   }
   
   const now = new Date();
+
+  if (dueAt) {
+    if (dueAt < now) {
+      return { error: "Deadline cannot be set before the current time." };
+    }
+    if (estimatedMins && estimatedMins > 0) {
+      const minDue = new Date(now.getTime() + estimatedMins * 60 * 1000);
+      if (dueAt < minDue) {
+        return { error: `Deadline must be at least ${estimatedMins} minutes in the future (current time + estimated time).` };
+      }
+    }
+  }
   
   const assignees = (assigneeId === "ALL_MEMBERS" && groupMemberIds.length > 0)
     ? groupMemberIds
@@ -44,6 +56,11 @@ export async function createTask(formData: FormData) {
 
   for (const targetAssigneeId of assignees) {
     const allWatcherIds = Array.from(new Set([...watcherIds, ...groupMemberIds])).filter((id) => id !== targetAssigneeId);
+
+    // Fetch assignee's reportsToId to determine their direct manager as reviewer
+    const assigneeDoc = await adminDb.collection("Employee").doc(targetAssigneeId).get();
+    const assigneeData = assigneeDoc.exists ? assigneeDoc.data() : null;
+    const reviewerId = reviewRequired ? (assigneeData?.reportsToId || null) : null;
 
     // Create task in Firestore
     const taskRef = await adminDb.collection("Task").add({
@@ -58,7 +75,7 @@ export async function createTask(formData: FormData) {
       urgent,
       important,
       reviewRequired,
-      reviewerId: reviewRequired ? user.reportsToId : null,
+      reviewerId,
       status: "NEW",
       category,
       groupId,
@@ -67,6 +84,8 @@ export async function createTask(formData: FormData) {
       deletedAt: null,   // must be explicit null for Firestore equality queries
       createdAt: now,
       updatedAt: now,
+      lastStatusChange: now,
+      statusDurations: {},
     });
 
     if (!firstId) firstId = taskRef.id;
@@ -174,10 +193,23 @@ export async function moveTask(formData: FormData) {
   if (!user) return { error: "Not signed in." };
 
   const taskId = String(formData.get("taskId") || "");
-  const status = String(formData.get("status") || "");
+  let status = String(formData.get("status") || "");
   const holdReason = String(formData.get("holdReason") || "") || null;
   const rejectionReason = String(formData.get("rejectionReason") || "") || null;
   if (!taskId || !status) return { error: "Missing fields." };
+
+  const taskDoc = await adminDb.collection("Task").doc(taskId).get();
+  if (!taskDoc.exists) return { error: "Task not found." };
+  const task = taskDoc.data()!;
+
+  let autoRouted = false;
+  if (status === "CLOSED" && task.reviewRequired) {
+    const isManager = user.id === task.creatorId || user.id === task.reviewerId || isManagerLike(user.systemRole);
+    if (!isManager) {
+      status = "PENDING_REVIEW";
+      autoRouted = true;
+    }
+  }
 
   if (status === "CLOSED") {
     const checklistSnap = await adminDb.collection("ChecklistItem").where("taskId", "==", taskId).get();
@@ -192,7 +224,30 @@ export async function moveTask(formData: FormData) {
     return { error: "A reason is required when sending a task back for rework." };
   }
 
-  const data: Record<string, any> = { status, updatedAt: new Date() };
+  const now = new Date();
+  const prevStatus = task.status;
+  const data: Record<string, any> = { status, updatedAt: now };
+
+  if (status !== prevStatus) {
+    let elapsedSeconds = 0;
+    if (task.lastStatusChange) {
+      const lastChange = task.lastStatusChange.toDate ? task.lastStatusChange.toDate() : new Date(task.lastStatusChange);
+      elapsedSeconds = Math.floor((now.getTime() - lastChange.getTime()) / 1000);
+    } else if (task.createdAt) {
+      const created = task.createdAt.toDate ? task.createdAt.toDate() : new Date(task.createdAt);
+      elapsedSeconds = Math.floor((now.getTime() - created.getTime()) / 1000);
+    }
+    
+    const currentDurations = task.statusDurations || {};
+    const updatedDurations = {
+      ...currentDurations,
+      [prevStatus]: (currentDurations[prevStatus] || 0) + elapsedSeconds
+    };
+
+    data.lastStatusChange = now;
+    data.statusDurations = updatedDurations;
+  }
+
   if (status === "ON_HOLD") data.holdReason = holdReason;
   if (status === "CLOSED") data.completedAt = new Date();
   if (status !== "ON_HOLD") data.holdReason = null;
@@ -209,7 +264,11 @@ export async function moveTask(formData: FormData) {
     action: status === "REOPENED" ? "task.reject" : "task.move",
     entity: "Task",
     entityId: taskId,
-    detail: status === "REOPENED" ? rejectionReason ?? "" : status + (holdReason ? ` (${holdReason})` : ""),
+    detail: status === "REOPENED" 
+      ? rejectionReason ?? "" 
+      : autoRouted 
+        ? "PENDING_REVIEW (auto-routed for manager review)" 
+        : status + (holdReason ? ` (${holdReason})` : ""),
     createdAt: new Date(),
   });
 
