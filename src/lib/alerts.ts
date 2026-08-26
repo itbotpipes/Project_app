@@ -120,7 +120,7 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
   // ── Manager alerts ────────────────────────────────────────────────────────
   if (isManagerLike(user.systemRole)) {
     const reportSnap = await adminDb.collection("Employee")
-      .where("reportsToId", "==", user.id)
+      .where("reportsToIds", "array-contains", user.id)
       .where("active", "==", true)
       .get();
     const reportIds = reportSnap.docs ? reportSnap.docs.map(d => d.id) : [];

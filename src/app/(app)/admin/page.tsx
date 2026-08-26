@@ -26,13 +26,14 @@ export default async function AdminPage() {
 
   const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
 
-  const [rolesSnap, employeesSnap, kpisSnap, staleTasksSnap, templatesSnap, departmentsSnap] = await Promise.all([
+  const [rolesSnap, employeesSnap, kpisSnap, staleTasksSnap, templatesSnap, departmentsSnap, systemRolesSnap] = await Promise.all([
     adminDb.collection("Role").orderBy("level", "asc").get(),
     adminDb.collection("Employee").orderBy("name", "asc").get(),
     adminDb.collection("KpiTemplate").get(),
     adminDb.collection("Task").where("status", "!=", "CLOSED").get(),
     adminDb.collection("TaskTemplate").get(),
     adminDb.collection("Department").get(),
+    adminDb.collection("SystemRole").orderBy("name", "asc").get(),
   ]);
 
   const roles = rolesSnap.docs.map((d) => {
@@ -106,8 +107,36 @@ export default async function AdminPage() {
     templatesByRole.set(t.roleId, arr);
   }
   const kpiOptionsForTemplates = kpis.map((k: any) => ({ id: k.id, kpiName: k.kpiName, roleId: k.roleId }));
+  
+  const defaultSystemRoles = [
+    { id: "EMPLOYEE", name: "EMPLOYEE", isManager: false, isAdmin: false },
+    { id: "MANAGER", name: "MANAGER", isManager: true, isAdmin: false },
+    { id: "CEO", name: "CEO", isManager: true, isAdmin: true },
+    { id: "ADMIN", name: "ADMIN", isManager: true, isAdmin: true },
+  ];
+  const customSystemRoles = systemRolesSnap && !systemRolesSnap.empty
+    ? systemRolesSnap.docs.map((d: any) => ({
+        id: d.data().name,
+        name: d.data().name,
+        isManager: !!d.data().isManager,
+        isAdmin: !!d.data().isAdmin,
+      }))
+    : [];
+
+  const allSystemRoles = [...defaultSystemRoles];
+  for (const csr of customSystemRoles) {
+    if (!allSystemRoles.some((r) => r.name.toUpperCase() === csr.name.toUpperCase())) {
+      allSystemRoles.push(csr);
+    }
+  }
+  const systemRoleOpts = allSystemRoles;
+
   const managerOpts = employees
-    .filter((e: any) => e.systemRole !== "EMPLOYEE")
+    .filter((e: any) => {
+      // Find if they have manager permissions dynamically or via defaults
+      const srObj = systemRoleOpts.find((sr) => sr.name === e.systemRole);
+      return srObj ? (srObj.isManager || srObj.isAdmin) : (e.systemRole !== "EMPLOYEE");
+    })
     .map((e: any) => ({ id: e.id, label: `${e.name} (${e.role.title})` }));
 
   return (
@@ -120,7 +149,7 @@ export default async function AdminPage() {
       <Card>
         <div className="flex items-center justify-between">
           <SectionTitle>People ({employees.filter((e: any) => e.active).length} active)</SectionTitle>
-          <NewEmployeeForm roles={roleOpts} managers={managerOpts} />
+          <NewEmployeeForm roles={roleOpts} managers={managerOpts} systemRoles={systemRoleOpts} />
         </div>
         <div className="mt-3 overflow-x-auto">
           <table className="w-full text-sm">
@@ -158,11 +187,13 @@ export default async function AdminPage() {
                         email: e.email,
                         roleId: e.roleId,
                         reportsToId: e.reportsToId || null,
+                        reportsToIds: e.reportsToIds || (e.reportsToId ? [e.reportsToId] : []),
                         systemRole: e.systemRole,
                         birthday: e.birthday ? (e.birthday.toDate ? e.birthday.toDate().toISOString() : new Date(e.birthday).toISOString()) : null,
                       }}
                       roles={roleOpts}
                       managers={managerOpts}
+                      systemRoles={systemRoleOpts}
                     />
                   </td>
                 </tr>

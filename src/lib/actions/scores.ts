@@ -20,7 +20,10 @@ async function canScoreForUser(
   // Managers can only score direct reports
   if (!isManagerLike(user.systemRole)) return false;
   const targetDoc = await adminDb.collection("Employee").doc(employeeId).get();
-  return targetDoc.exists && targetDoc.data()!.reportsToId === user.id;
+  if (!targetDoc.exists) return false;
+  const targetData = targetDoc.data()!;
+  const reportsToIds = targetData.reportsToIds || (targetData.reportsToId ? [targetData.reportsToId] : []);
+  return reportsToIds.includes(user.id);
 }
 
 

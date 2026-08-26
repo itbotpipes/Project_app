@@ -41,24 +41,40 @@ export default function BucketFill({
           <div key={b.id} className={cn("flex flex-col items-center gap-1.5", colW)}>
             <div className="relative" style={{ height: size === "sm" ? 100 : 152, width: size === "sm" ? 44 : 56 }}>
               {/* top coupling / flange */}
-              <div className="absolute -top-1 left-1/2 z-20 h-2.5 -translate-x-1/2 rounded-[3px] bg-gradient-to-b from-red-500 to-red-700 shadow-sm"
+              <div className="absolute -top-1 left-1/2 z-20 h-2.5 -translate-x-1/2 rounded-[3px] bg-gradient-to-r from-red-700 via-red-500 to-red-800 shadow-[0_1px_3px_rgba(0,0,0,0.3)] border border-red-900/30"
                    style={{ width: (size === "sm" ? 44 : 56) + 6 }} />
               {/* bottom coupling / flange */}
-              <div className="absolute -bottom-1 left-1/2 z-20 h-2.5 -translate-x-1/2 rounded-[3px] bg-gradient-to-b from-red-600 to-red-800 shadow-sm"
+              <div className="absolute -bottom-1 left-1/2 z-20 h-2.5 -translate-x-1/2 rounded-[3px] bg-gradient-to-r from-red-800 via-red-600 to-red-900 shadow-[0_1px_3px_rgba(0,0,0,0.3)] border border-red-950/30"
                    style={{ width: (size === "sm" ? 44 : 56) + 6 }} />
 
               {/* the pipe body: red rim, transparent glassy window */}
               <div
                 className={cn(
-                  "absolute inset-0 z-10 overflow-hidden rounded-[10px] border-[3px] bg-gradient-to-r from-white/70 via-slate-50/40 to-white/70 shadow-inner",
+                  "absolute inset-0 z-10 overflow-hidden rounded-[10px] border-[3px] bg-gradient-to-r from-slate-50/15 via-white/5 to-slate-100/15 backdrop-blur-[2px] shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)] transition-all duration-300",
                   pipe,
                   active
-                    ? "border-red-600 ring-2 ring-amber-400 ring-offset-1"
-                    : "border-red-600 ring-1 ring-red-800/30",
+                    ? "border-red-600 ring-2 ring-amber-400 ring-offset-1 shadow-[0_0_12px_rgba(239,68,68,0.5),inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                    : "border-red-600/85 ring-1 ring-red-800/20 shadow-[0_2px_6px_rgba(0,0,0,0.05),inset_0_2px_8px_rgba(0,0,0,0.2)] hover:border-red-600 hover:shadow-[0_4px_10px_rgba(239,68,68,0.25),inset_0_2px_8px_rgba(0,0,0,0.2)]",
                 )}
                 style={{ height: size === "sm" ? 100 : 152, width: size === "sm" ? 44 : 56 }}
                 title={`${b.name}: ${b.count} task${b.count === 1 ? "" : "s"}`}
               >
+                {/* calibration ticks (gauge markings) */}
+                <div className="absolute inset-y-2 left-1 z-25 flex flex-col justify-between w-1 opacity-40 pointer-events-none">
+                  <div className="h-[1px] w-full bg-red-600" />
+                  <div className="h-[1px] w-2/3 bg-red-600" />
+                  <div className="h-[1px] w-full bg-red-600" />
+                  <div className="h-[1px] w-2/3 bg-red-600" />
+                  <div className="h-[1px] w-full bg-red-600" />
+                </div>
+                <div className="absolute inset-y-2 right-1 z-25 flex flex-col justify-between w-1 opacity-40 pointer-events-none">
+                  <div className="h-[1px] w-full bg-red-600" />
+                  <div className="h-[1px] w-2/3 bg-red-600" />
+                  <div className="h-[1px] w-full bg-red-600" />
+                  <div className="h-[1px] w-2/3 bg-red-600" />
+                  <div className="h-[1px] w-full bg-red-600" />
+                </div>
+
                 {/* water column */}
                 <div
                   className={cn("absolute inset-x-0 bottom-0", b.count > 0 && "animate-waterBob")}
@@ -67,10 +83,10 @@ export default function BucketFill({
                   {/* body of the water */}
                   <div
                     className={cn(
-                      "absolute inset-0",
+                      "absolute inset-0 transition-all duration-300",
                       b.count === 0
-                        ? "bg-slate-100"
-                        : "bg-gradient-to-t from-sky-600 via-sky-500 to-cyan-400",
+                        ? "bg-slate-200/10"
+                        : "bg-gradient-to-t from-sky-600 via-sky-500 to-cyan-400 shadow-[inset_0_0_8px_rgba(14,165,233,0.5)]",
                     )}
                   />
                   {b.count > 0 && (
@@ -87,19 +103,25 @@ export default function BucketFill({
                 </div>
 
                 {/* glossy vertical highlight on the pipe */}
-                <div className="animate-pipeSheen pointer-events-none absolute inset-y-2 left-1.5 w-1.5 rounded-full bg-white/60" />
+                <div className="animate-pipeSheen pointer-events-none absolute inset-y-2 left-1 w-1 rounded-full bg-white/50" />
                 {/* faint right shadow for the cylinder look */}
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-red-900/10 to-transparent" />
+                <div className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-red-900/15 to-transparent z-15" />
 
-                {/* the count */}
-                <div className="absolute inset-0 grid place-items-center">
-                  <span className={cn("text-sm font-bold tabular-nums drop-shadow", level > 45 ? "text-white" : "text-slate-600")}>
+                {/* the count - elegant badge */}
+                <div className="absolute inset-0 grid place-items-center z-30 pointer-events-none">
+                  <span className={cn(
+                    "flex items-center justify-center rounded-full font-bold tabular-nums border transition-all duration-300 shadow-sm",
+                    size === "sm" ? "h-5 w-5 text-[10px]" : "h-7 w-7 text-xs",
+                    b.count === 0
+                      ? "bg-slate-100/90 border-slate-300 text-slate-500"
+                      : "bg-white/95 border-cyan-200 text-cyan-900 shadow-cyan-100/50"
+                  )}>
                     {b.count}
                   </span>
                 </div>
               </div>
             </div>
-            <span className="line-clamp-2 text-center text-[11px] leading-tight text-slate-600" title={b.name}>
+            <span className="line-clamp-2 text-center text-[11px] leading-tight text-slate-600 font-medium" title={b.name}>
               {b.name}
             </span>
           </div>

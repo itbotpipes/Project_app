@@ -23,7 +23,7 @@ export default async function PerformancePage() {
       .orderBy("month", "desc")
       .limit(1)
       .get(),
-    manager ? adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get() : Promise.resolve(null)
+    manager ? adminDb.collection("Employee").where("reportsToIds", "array-contains", user.id).where("active", "==", true).get() : Promise.resolve(null)
   ]);
 
   const {

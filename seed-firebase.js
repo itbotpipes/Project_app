@@ -301,13 +301,15 @@ async function main() {
   const empMap = new Map();
   for (const [name, roleTitle, systemRole, managerName] of employees) {
     const ref = db.collection("Employee").doc();
+    const repId = managerName ? (empMap.get(managerName) ?? null) : null;
     await ref.set({
       name,
       email: emailFor(name),
       passwordHash,
       roleId: roleMap.get(roleTitle),
       systemRole,
-      reportsToId: managerName ? (empMap.get(managerName) ?? null) : null,
+      reportsToId: repId,
+      reportsToIds: repId ? [repId] : [],
       active: true,
       createdAt: new Date(),
       updatedAt: new Date(),

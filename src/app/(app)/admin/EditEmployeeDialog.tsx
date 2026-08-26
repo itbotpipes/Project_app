@@ -12,6 +12,7 @@ interface EmployeeData {
   email: string;
   roleId: string;
   reportsToId: string | null;
+  reportsToIds?: string[];
   systemRole: string;
   birthday?: string | Date | null;
 }
@@ -20,14 +21,19 @@ export default function EditEmployeeDialog({
   employee,
   roles,
   managers,
+  systemRoles,
 }: {
   employee: EmployeeData;
   roles: Opt[];
   managers: Opt[];
+  systemRoles: { id: string; name: string }[];
 }) {
   const [open, setOpen] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const [selectedReportsToIds, setSelectedReportsToIds] = useState<string[]>(
+    employee.reportsToIds || (employee.reportsToId ? [employee.reportsToId] : [])
+  );
 
   // Format default date string for input type="date"
   let defaultBday = "";
@@ -121,23 +127,38 @@ export default function EditEmployeeDialog({
                 </select>
               </label>
 
-              <label className="text-xs font-semibold text-slate-600">
-                Reports To
-                <select
-                  name="reportsToId"
-                  defaultValue={employee.reportsToId ?? ""}
-                  className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-blue-500"
-                >
-                  <option value="">— none —</option>
+              <div className="sm:col-span-2">
+                <span className="text-xs font-semibold text-slate-600">Reports To (Select one or more managers)</span>
+                <div className="mt-1 max-h-32 overflow-y-auto rounded-lg border border-slate-300 bg-white p-2 space-y-1">
                   {managers
                     .filter((m) => m.id !== employee.id) // Cannot report to self
-                    .map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.label}
-                      </option>
-                    ))}
-                </select>
-              </label>
+                    .map((m) => {
+                      const isChecked = selectedReportsToIds.includes(m.id);
+                      return (
+                        <label key={m.id} className="flex items-center gap-2 text-sm text-slate-700 hover:bg-slate-50 p-1.5 rounded cursor-pointer select-none">
+                          <input
+                            type="checkbox"
+                            name="reportsToIds"
+                            value={m.id}
+                            checked={isChecked}
+                            onChange={() => {
+                              setSelectedReportsToIds((prev) =>
+                                prev.includes(m.id)
+                                  ? prev.filter((id) => id !== m.id)
+                                  : [...prev, m.id]
+                              );
+                            }}
+                            className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                          />
+                          <span>{m.label}</span>
+                        </label>
+                      );
+                    })}
+                  {managers.filter((m) => m.id !== employee.id).length === 0 && (
+                    <p className="text-xs text-slate-400 p-1">No managers available.</p>
+                  )}
+                </div>
+              </div>
 
               <label className="text-xs font-semibold text-slate-600">
                 System Role (Access Level)
@@ -146,10 +167,11 @@ export default function EditEmployeeDialog({
                   defaultValue={employee.systemRole}
                   className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-2 py-2 text-sm outline-none focus:border-blue-500"
                 >
-                  <option value="EMPLOYEE">Employee</option>
-                  <option value="MANAGER">Manager</option>
-                  <option value="CEO">CEO</option>
-                  <option value="ADMIN">Admin</option>
+                  {systemRoles.map((sr) => (
+                    <option key={sr.id} value={sr.name}>
+                      {sr.name}
+                    </option>
+                  ))}
                 </select>
               </label>
 

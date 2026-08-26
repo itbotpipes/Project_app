@@ -41,9 +41,9 @@ export default function Celebration({ name }: { name: string }) {
           <div className="flex flex-col items-center gap-4 text-center">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
-              src="/logo-mark.svg"
+              src="/logo2.jpeg"
               alt="Northern Star"
-              className="animate-logoSpinIn h-28 w-28 drop-shadow-2xl"
+              className="animate-logoSpinIn h-20 w-auto object-contain drop-shadow-2xl"
             />
             <div>
               <div className="text-2xl font-bold text-white">Voilà, {name}! 🎉</div>

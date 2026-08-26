@@ -111,20 +111,42 @@ export const getCurrentUser = cache(async () => {
     }
   }
   
-  return { id, ...serializedUser, role: roleData } as any;
+  const systemRoleDocSnap = await adminDb.collection("SystemRole").where("name", "==", serializedUser.systemRole).limit(1).get();
+  let systemRoleObj = { isManager: false, isAdmin: false };
+  if (!systemRoleDocSnap.empty) {
+    const data = systemRoleDocSnap.docs[0].data();
+    systemRoleObj = { isManager: !!data.isManager, isAdmin: !!data.isAdmin };
+  } else {
+    if (["ADMIN", "CEO"].includes(serializedUser.systemRole)) {
+      systemRoleObj = { isManager: true, isAdmin: true };
+    } else if (serializedUser.systemRole === "MANAGER") {
+      systemRoleObj = { isManager: true, isAdmin: false };
+    }
+  }
+
+  return { id, ...serializedUser, role: roleData, systemRoleObj } as any;
 });
 
-export function isManagerLike(systemRole: string) {
-  return systemRole === "ADMIN" || systemRole === "CEO" || systemRole === "MANAGER";
+export function isManagerLike(userOrRole: any, systemRoleObj?: { isManager: boolean; isAdmin: boolean }) {
+  if (!userOrRole) return false;
+  if (typeof userOrRole === 'object') {
+    const sObj = userOrRole.systemRoleObj || systemRoleObj;
+    if (sObj) return sObj.isManager || sObj.isAdmin;
+    return userOrRole.systemRole === "ADMIN" || userOrRole.systemRole === "CEO" || userOrRole.systemRole === "MANAGER";
+  }
+  if (systemRoleObj) {
+    return systemRoleObj.isManager || systemRoleObj.isAdmin;
+  }
+  return userOrRole === "ADMIN" || userOrRole === "CEO" || userOrRole === "MANAGER";
 }
 
-type ScoringUser = { systemRole: string; role: { title: string } };
+type ScoringUser = { systemRole: string; systemRoleObj?: { isManager: boolean; isAdmin: boolean }; role: { title: string } };
 
 /** Company-wide scoring visibility: ADMIN/CEO always, plus HR (per the COO's request). */
 export function canScoreCompanyWide(user: ScoringUser) {
+  const isAdmin = user.systemRoleObj ? user.systemRoleObj.isAdmin : (user.systemRole === "ADMIN" || user.systemRole === "CEO");
   return (
-    user.systemRole === "ADMIN" ||
-    user.systemRole === "CEO" ||
+    isAdmin ||
     user.role.title.toLowerCase().includes("hr")
   );
 }
@@ -137,13 +159,15 @@ export function hasPermission(user: any, permission: string): boolean {
   }
   
   // Fallbacks using legacy rules
+  const isAdmin = user.systemRoleObj ? user.systemRoleObj.isAdmin : (user.systemRole === "ADMIN" || user.systemRole === "CEO");
+  const isMgr = isManagerLike(user.systemRole, user.systemRoleObj);
   switch (permission) {
     case "admin":
-      return user.systemRole === "ADMIN" || user.systemRole === "CEO";
+      return isAdmin;
     case "delegated":
     case "team":
     case "people":
-      return isManagerLike(user.systemRole);
+      return isMgr;
     case "scores":
     case "announcements":
       return canScoreCompanyWide(user);

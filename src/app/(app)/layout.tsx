@@ -33,7 +33,7 @@ export default async function AppLayout({
         <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
           <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-4">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo-mark.svg" alt="Northern Star Engineering" className="h-9 w-9" />
+            <img src="/logo2.jpeg" alt="Northern Star Engineering" className="h-9 w-auto object-contain" />
             <div className="leading-tight">
               <div className="text-sm font-semibold">
                 Task<span className="text-blue-600">Flow</span>

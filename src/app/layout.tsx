@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "TaskFlow · Northern Star",
   description: "TaskFlow — internal task, KPI and performance management for Northern Star Engineering",
-  icons: { icon: "/logo-mark.svg" },
+  icons: { icon: "/logo2.jpeg" },
 };
 
 export default function RootLayout({

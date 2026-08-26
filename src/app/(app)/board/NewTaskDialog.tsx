@@ -113,7 +113,20 @@ export default function NewTaskDialog({
             className="max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-5 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
-            <h2 className="mb-3 text-lg font-semibold">Assign New Task</h2>
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-lg font-semibold">Assign New Task</h2>
+              <button
+                type="button"
+                onClick={() => {
+                  setOpen(false);
+                  resetForm();
+                }}
+                className="rounded-full p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 transition-colors"
+                title="Cancel and close"
+              >
+                <X size={18} />
+              </button>
+            </div>
             <form
               action={async (fd) => {
                 const dueRaw = String(fd.get("dueAt") || "");

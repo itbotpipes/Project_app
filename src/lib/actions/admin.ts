@@ -53,7 +53,8 @@ export async function createEmployee(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const email = String(formData.get("email") || "").trim().toLowerCase();
   const roleId = String(formData.get("roleId") || "");
-  const reportsToId = String(formData.get("reportsToId") || "") || null;
+  const reportsToIds = formData.getAll("reportsToIds").map(String).filter(Boolean);
+  const reportsToId = reportsToIds[0] || null;
   const systemRole = String(formData.get("systemRole") || "EMPLOYEE");
   const bday = String(formData.get("birthday") || "");
   const password = String(formData.get("password") || "").trim() || "password123";
@@ -75,6 +76,7 @@ export async function createEmployee(formData: FormData) {
     email,
     roleId,
     reportsToId,
+    reportsToIds,
     systemRole,
     birthday: bday ? new Date(bday) : null,
     passwordHash,
@@ -241,7 +243,8 @@ export async function updateEmployee(formData: FormData) {
   const name = String(formData.get("name") || "").trim();
   const email = String(formData.get("email") || "").trim().toLowerCase();
   const roleId = String(formData.get("roleId") || "");
-  const reportsToId = String(formData.get("reportsToId") || "") || null;
+  const reportsToIds = formData.getAll("reportsToIds").map(String).filter(Boolean);
+  const reportsToId = reportsToIds[0] || null;
   const systemRole = String(formData.get("systemRole") || "EMPLOYEE");
   const bday = String(formData.get("birthday") || "");
   const password = String(formData.get("password") || "");
@@ -255,6 +258,7 @@ export async function updateEmployee(formData: FormData) {
     email,
     roleId,
     reportsToId,
+    reportsToIds,
     systemRole,
     birthday: bday ? new Date(bday) : null,
     updatedAt: new Date()
@@ -285,5 +289,64 @@ export async function updateEmployee(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/people");
+  return { ok: true };
+}
+
+export async function createDepartment(formData: FormData) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const name = String(formData.get("name") || "").trim();
+  if (!name) return { error: "Department name is required" };
+
+  const existsSnap = await adminDb.collection("Department").where("name", "==", name).limit(1).get();
+  if (!existsSnap.empty) return { error: "That department already exists" };
+
+  await adminDb.collection("Department").add({
+    name,
+    createdAt: new Date(),
+  });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: admin.id,
+    action: "department.create",
+    entity: "Department",
+    detail: name,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+export async function createSystemRole(formData: FormData) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const name = String(formData.get("name") || "").trim();
+  const isManager = formData.get("isManager") === "on";
+  const isAdmin = formData.get("isAdmin") === "on";
+
+  if (!name) return { error: "System role name is required" };
+
+  const existsSnap = await adminDb.collection("SystemRole").where("name", "==", name).limit(1).get();
+  if (!existsSnap.empty) return { error: "That system role already exists" };
+
+  await adminDb.collection("SystemRole").add({
+    name,
+    isManager,
+    isAdmin,
+    createdAt: new Date(),
+  });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: admin.id,
+    action: "systemrole.create",
+    entity: "SystemRole",
+    detail: name,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
   return { ok: true };
 }

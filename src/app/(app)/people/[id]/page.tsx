@@ -19,12 +19,15 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
   if (!empDoc.exists) notFound();
   
   let roleData: any = { title: "Unknown", department: null };
+  const reportsToIds = rawEmp.reportsToIds || (rawEmp.reportsToId ? [rawEmp.reportsToId] : []);
   let reportsToName: string | null = null;
-  const rawEmp = empDoc.data()!;
+  const rawEmpData = empDoc.data()!;
 
-  const [roleDoc, reportsToDoc] = await Promise.all([
-    rawEmp.roleId ? adminDb.collection("Role").doc(rawEmp.roleId).get() : Promise.resolve(null),
-    rawEmp.reportsToId ? adminDb.collection("Employee").doc(rawEmp.reportsToId).get() : Promise.resolve(null),
+  const [roleDoc, reportsToDocs] = await Promise.all([
+    rawEmpData.roleId ? adminDb.collection("Role").doc(rawEmpData.roleId).get() : Promise.resolve(null),
+    reportsToIds.length > 0
+      ? Promise.all(reportsToIds.map((id: string) => adminDb.collection("Employee").doc(id).get()))
+      : Promise.resolve([]),
   ]);
 
   if (roleDoc?.exists) {
@@ -35,12 +38,13 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
       if (deptDoc.exists) roleData.department = { name: deptDoc.data()!.name };
     }
   }
-  if (reportsToDoc?.exists) reportsToName = reportsToDoc.data()!.name;
+  const reportsToNames = reportsToDocs.map((doc: any) => doc?.exists ? doc.data().name : "").filter(Boolean);
+  if (reportsToNames.length > 0) reportsToName = reportsToNames.join(", ");
 
-  const employee: any = { id: empDoc.id, ...rawEmp, role: roleData, reportsToId: rawEmp.reportsToId, reportsTo: reportsToName ? { name: reportsToName } : null };
+  const employee: any = { id: empDoc.id, ...rawEmpData, role: roleData, reportsToId: rawEmpData.reportsToId, reportsToIds, reportsTo: reportsToName ? { name: reportsToName } : null };
 
   // Admin/CEO/HR see anyone; a plain manager only sees their own direct reports.
-  const allowed = canScoreCompanyWide(user) || employee.reportsToId === user.id || employee.id === user.id;
+  const allowed = canScoreCompanyWide(user) || reportsToIds.includes(user.id) || employee.id === user.id;
   if (!allowed) redirect("/people");
 
   const {

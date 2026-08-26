@@ -11,7 +11,7 @@ export default async function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="mb-6 text-center">
           {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo-mark.svg" alt="Northern Star Engineering" className="mx-auto mb-3 h-16 w-16" />
+          <img src="/logo2.jpeg" alt="Northern Star Engineering" className="mx-auto mb-3 h-14 w-auto object-contain" />
           <h1 className="text-2xl font-semibold">
             Task<span className="text-blue-600">Flow</span>
           </h1>

@@ -2,7 +2,7 @@
 
 import { useState, useTransition, useRef } from "react";
 import { Shield, Plus, Key, Check, Info } from "lucide-react";
-import { createRole, updateRolePermissions } from "@/lib/actions/admin";
+import { createRole, updateRolePermissions, createDepartment, createSystemRole } from "@/lib/actions/admin";
 
 interface Role {
   id: string;
@@ -46,8 +46,12 @@ const AVAILABLE_PAGES = [
 
 export default function RoleManager({ roles, departments }: RoleManagerProps) {
   const [openNew, setOpenNew] = useState(false);
+  const [openNewDept, setOpenNewDept] = useState(false);
+  const [openNewSystemRole, setOpenNewSystemRole] = useState(false);
   const [activeRole, setActiveRole] = useState<string | null>(null);
   const [newMsg, setNewMsg] = useState<string | null>(null);
+  const [newDeptMsg, setNewDeptMsg] = useState<string | null>(null);
+  const [newSystemRoleMsg, setNewSystemRoleMsg] = useState<string | null>(null);
   const [saveMsg, setSaveMsg] = useState<Record<string, string>>({});
   const [, startTransition] = useTransition();
   const formRef = useRef<HTMLFormElement>(null);
@@ -95,13 +99,101 @@ export default function RoleManager({ roles, departments }: RoleManagerProps) {
           <h3 className="text-sm font-semibold text-slate-800">Custom Roles & Page Permissions</h3>
           <p className="text-xs text-slate-500">Configure page-level access for every position in the company.</p>
         </div>
-        <button
-          onClick={() => setOpenNew(!openNew)}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700"
-        >
-          <Plus size={14} /> Create custom position
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => { setOpenNew(!openNew); setOpenNewDept(false); setOpenNewSystemRole(false); }}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-blue-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-blue-700 font-medium"
+          >
+            <Plus size={14} /> Create custom position
+          </button>
+          <button
+            onClick={() => { setOpenNewDept(!openNewDept); setOpenNew(false); setOpenNewSystemRole(false); }}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-slate-700 font-medium"
+          >
+            <Plus size={14} /> Create Department
+          </button>
+          <button
+            onClick={() => { setOpenNewSystemRole(!openNewSystemRole); setOpenNew(false); setOpenNewDept(false); }}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-teal-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-teal-700 font-medium"
+          >
+            <Plus size={14} /> Create System Role
+          </button>
+        </div>
       </div>
+
+      {/* New Department form */}
+      {openNewDept && (
+        <form
+          action={async (fd) => {
+            const res = await createDepartment(fd);
+            if (res?.error) {
+              setNewDeptMsg(res.error);
+            } else {
+              setNewDeptMsg("✓ Department created successfully!");
+              setTimeout(() => {
+                setOpenNewDept(false);
+                setNewDeptMsg(null);
+              }, 2000);
+            }
+          }}
+          className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2"
+        >
+          <div className="sm:col-span-2">
+            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">New Department</h4>
+          </div>
+          <label className="text-xs font-medium text-slate-600 sm:col-span-2">
+            Department Name
+            <input name="name" required placeholder="e.g. Quality Control" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
+          </label>
+          <div className="sm:col-span-2 flex items-center gap-3">
+            <button className="rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-blue-700">
+              Save Department
+            </button>
+            {newDeptMsg && <span className="text-xs font-medium text-slate-600">{newDeptMsg}</span>}
+          </div>
+        </form>
+      )}
+
+      {/* New System Role form */}
+      {openNewSystemRole && (
+        <form
+          action={async (fd) => {
+            const res = await createSystemRole(fd);
+            if (res?.error) {
+              setNewSystemRoleMsg(res.error);
+            } else {
+              setNewSystemRoleMsg("✓ System role created successfully!");
+              setTimeout(() => {
+                setOpenNewSystemRole(false);
+                setNewSystemRoleMsg(null);
+              }, 2000);
+            }
+          }}
+          className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 sm:grid-cols-2"
+        >
+          <div className="sm:col-span-2">
+            <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wide">New System Role (Access Level)</h4>
+          </div>
+          <label className="text-xs font-medium text-slate-600 sm:col-span-2">
+            System Role Name
+            <input name="name" required placeholder="e.g. HOD, DIRECTOR" className="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm outline-none focus:border-blue-500" />
+          </label>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <input type="checkbox" name="isManager" className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            Has Manager Permissions (e.g. view team, assign tasks)
+          </label>
+          <label className="flex items-center gap-2 text-xs font-medium text-slate-600">
+            <input type="checkbox" name="isAdmin" className="rounded border-slate-300 text-blue-600 focus:ring-blue-500" />
+            Has Admin Permissions (e.g. full config panel)
+          </label>
+          <div className="sm:col-span-2 flex items-center gap-3">
+            <button className="rounded-lg bg-blue-600 px-3.5 py-2 text-xs font-medium text-white hover:bg-blue-700">
+              Save System Role
+            </button>
+            {newSystemRoleMsg && <span className="text-xs font-medium text-slate-600">{newSystemRoleMsg}</span>}
+          </div>
+        </form>
+      )}
 
       {/* New Role form */}
       {openNew && (

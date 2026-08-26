@@ -18,7 +18,7 @@ export default async function TeamPage() {
   if (!user) return null;
   if (!hasPermission(user, "team")) redirect("/");
 
-  const reportsSnap = await adminDb.collection("Employee").where("reportsToId", "==", user.id).where("active", "==", true).get();
+  const reportsSnap = await adminDb.collection("Employee").where("reportsToIds", "array-contains", user.id).where("active", "==", true).get();
   
   // Batch fetch all related data
   const roleIds = reportsSnap.docs ? reportsSnap.docs.map((d: any) => d.data().roleId).filter(Boolean) as string[] : [];

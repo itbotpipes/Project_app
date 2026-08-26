@@ -36,7 +36,7 @@ export default async function ScoresPage({
       300 // cache for 5 minutes
     );
   } else {
-    employeesSnap = await adminDb.collection("Employee").where("active", "==", true).where("reportsToId", "==", user.id).get();
+    employeesSnap = await adminDb.collection("Employee").where("active", "==", true).where("reportsToIds", "array-contains", user.id).get();
   }
   
   const employees = employeesSnap.docs ? employeesSnap.docs.map((doc) => {
@@ -46,7 +46,7 @@ export default async function ScoresPage({
   
   // Batch fetch roles, departments, and managers
   const roleIds = [...new Set(employees.map((e) => e.roleId).filter(Boolean))] as string[];
-  const managerIds = [...new Set(employees.map((e) => e.reportsToId).filter(Boolean))] as string[];
+  const managerIds = [...new Set(employees.flatMap((e) => e.reportsToIds || (e.reportsToId ? [e.reportsToId] : [])).filter(Boolean))] as string[];
   const [rolesMap, departmentsMap, managersMap] = await Promise.all([
     batchFetchByIds('Role', roleIds, adminDb),
     fetchAllDepartments(adminDb),
@@ -70,8 +70,9 @@ export default async function ScoresPage({
         }
       : { title: "Unknown", department: null };
       
-    const managerObj = e.reportsToId ? (managersMap.get(e.reportsToId) as any) : null;
-    e.reportsToName = managerObj?.name ?? "—";
+    const mgrIds = e.reportsToIds || (e.reportsToId ? [e.reportsToId] : []);
+    const mgrNames = mgrIds.map((id: string) => (managersMap.get(id) as any)?.name).filter(Boolean);
+    e.reportsToName = mgrNames.length > 0 ? mgrNames.join(", ") : "—";
   });
   
   employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
