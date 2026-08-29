@@ -113,8 +113,8 @@ export default async function GroupsPage() {
     };
   }).sort((a, b) => a.name.localeCompare(b.name)) : [];
 
-  const activeGroups = groups.filter((g) => g.active);
-  const deactivatedGroups = groups.filter((g) => !g.active && (g.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO"));
+  const activeGroups = groups.filter((g) => g.active && g.members.some((m) => m.employeeId === user.id));
+  const deactivatedGroups = groups.filter((g) => !g.active && g.members.some((m) => m.employeeId === user.id) && (g.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO"));
 
   return (
     <div className="mx-auto max-w-5xl space-y-4">

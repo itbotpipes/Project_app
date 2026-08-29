@@ -74,8 +74,7 @@ export default async function GroupDetailPage({
   });
 
   const memberIdsSet = new Set(memberEmployees.map((m) => m.id));
-  const isMember = memberIdsSet.has(user.id);
-  if (!isMember && !isManagerLike(user.systemRole)) notFound();
+  if (!isMember) notFound();
 
   const canManage = group.createdById === user.id || user.systemRole === "ADMIN" || user.systemRole === "CEO" ||
     memberEmployees.some((m) => m.id === user.id && m.role === "ADMIN");

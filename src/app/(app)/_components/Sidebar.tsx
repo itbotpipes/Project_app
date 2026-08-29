@@ -20,6 +20,7 @@ import {
   BookmarkCheck,
   Trash2,
   Activity,
+  User,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 
@@ -56,17 +57,21 @@ export default function Sidebar({
   systemRole,
   isManager,
   canScore,
+  canViewAllTasks = false,
 }: {
   userPermissions: string[] | null;
   systemRole: string;
   isManager: boolean;
   canScore: boolean;
+  canViewAllTasks?: boolean;
 }) {
   const pathname = usePathname();
 
   const items: Item[] = [
     ...(hasPermission("dashboard", userPermissions, systemRole, isManager, canScore) ? [{ href: "/", label: "Dashboard", icon: LayoutDashboard }] : []),
+    { href: "/profile", label: "My Profile", icon: User },
     ...(hasPermission("board", userPermissions, systemRole, isManager, canScore) ? [{ href: "/board", label: "My Board", icon: KanbanSquare }] : []),
+    ...(canViewAllTasks ? [{ href: "/all-tasks", label: "All Tasks", icon: ClipboardCheck }] : []),
     ...(hasPermission("groups", userPermissions, systemRole, isManager, canScore) ? [{ href: "/groups", label: "Groups", icon: Users2 }] : []),
     ...(hasPermission("delegated", userPermissions, systemRole, isManager, canScore) ? [{ href: "/delegated", label: "Delegated Tasks", icon: Share2 }] : []),
     ...(hasPermission("subscribed", userPermissions, systemRole, isManager, canScore) ? [{ href: "/subscribed", label: "Subscribed Tasks", icon: Bell }] : []),
