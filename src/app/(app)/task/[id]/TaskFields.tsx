@@ -220,6 +220,16 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
                       <div className="mb-1 text-xs text-slate-500">🎤 Voice note</div>
                       {/* eslint-disable-next-line jsx-a11y/media-has-caption */}
                       <audio controls src={a.url} className="w-full" />
+                      {a.transcript && (
+                        <details className="mt-2 text-xs">
+                          <summary className="cursor-pointer font-medium text-blue-600 hover:underline select-none">
+                            Transcript
+                          </summary>
+                          <div className="mt-1.5 rounded bg-slate-50 border-l-2 border-slate-300 p-2 text-slate-600 italic whitespace-pre-wrap">
+                            &ldquo;{a.transcript}&rdquo;
+                          </div>
+                        </details>
+                      )}
                     </div>
                   ) : a.kind === "PHOTO" || /\.(png|jpe?g|gif|webp)$/i.test(a.url) ? (
                     // eslint-disable-next-line @next/next/no-img-element
