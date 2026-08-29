@@ -8,6 +8,7 @@ import { Card, SectionTitle } from "../_components/ui";
 import BucketFill from "../_components/BucketFill";
 import NewTaskDialog from "./NewTaskDialog";
 import KanbanBoard from "./KanbanBoard";
+import Celebration from "../_components/Celebration";
 import { loadTemplateOptions } from "@/lib/templates";
 import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
@@ -149,6 +150,7 @@ export default async function BoardPage({
     if (createdAt.getTime() < periodStartMs) continue;
     const kpiId = doc.data().kpiTemplateId;
     if (!kpiId) continue;
+    if (doc.data().status === "CLOSED") continue;
     countByKpi.set(kpiId, (countByKpi.get(kpiId) ?? 0) + 1);
   }
   const bucketData = kpiOptions.map(k => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
@@ -164,6 +166,7 @@ export default async function BoardPage({
     if (createdAt.getTime() < todayStartMs) continue;
     const kpiId = doc.data().kpiTemplateId;
     if (!kpiId) continue;
+    if (doc.data().status === "CLOSED") continue;
     todaysCounts[kpiId] = (todaysCounts[kpiId] ?? 0) + 1;
   }
 
@@ -193,9 +196,17 @@ export default async function BoardPage({
     checklistTotal: t.checklistItems.length,
     checklistDone: t.checklistItems.filter((c: any) => c.done).length,
   }));
+  const closedTodayDocs = monthTasksSnap.docs
+    ? monthTasksSnap.docs.filter(d => {
+        const cAt = toDate(d.data().completedAt);
+        return d.data().status === "CLOSED" && cAt && cAt.getTime() >= todayStart.getTime() && !d.data().deletedAt;
+      })
+    : [];
+  const celebrate = activeBoardDocs.length === 0 && closedTodayDocs.length > 0;
 
   return (
     <div className="space-y-4">
+      {celebrate && <Celebration name={user.name.split(" ")[0]} />}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold">My Board</h1>
