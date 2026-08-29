@@ -152,6 +152,7 @@ export async function uploadTaskAttachment(formData: FormData) {
 
     const secureUrl = uploadResult.secure_url;
     const now = new Date();
+    const transcript = formData.get("transcript") ? String(formData.get("transcript")) : null;
 
     // Save attachment to Firestore
     const docRef = await adminDb.collection("Attachment").add({
@@ -160,6 +161,7 @@ export async function uploadTaskAttachment(formData: FormData) {
       url: secureUrl,
       filename: file.name || "upload",
       createdAt: now,
+      transcript: transcript || null,
     });
     
     await adminDb.collection("AuditLog").add({
@@ -178,7 +180,8 @@ export async function uploadTaskAttachment(formData: FormData) {
         id: docRef.id,
         kind,
         url: secureUrl,
-        filename: file.name || "upload"
+        filename: file.name || "upload",
+        transcript: transcript || null
       }
     };
   } catch (error) {
