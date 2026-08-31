@@ -135,9 +135,13 @@ export async function setEmployeeActive(formData: FormData) {
 }
 
 export async function addKpiTemplate(formData: FormData) {
-  const admin = await requireAdmin();
-  if (!admin) return { error: "Not authorized" };
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authorized" };
   const roleId = String(formData.get("roleId") || "");
+  const isAdmin = user.systemRole === "ADMIN" || user.systemRole === "CEO";
+  if (!isAdmin && roleId !== user.roleId) {
+    return { error: "Not authorized" };
+  }
   const kraName = String(formData.get("kraName") || "").trim();
   const kpiName = String(formData.get("kpiName") || "").trim();
   const weightage = Number(formData.get("weightage") || 0);
@@ -157,7 +161,7 @@ export async function addKpiTemplate(formData: FormData) {
   });
   
   await adminDb.collection("AuditLog").add({
-    actorId: admin.id,
+    actorId: user.id,
     action: "kpi.add",
     entity: "KpiTemplate",
     detail: `${kpiName} (${weightage})`,
@@ -165,33 +169,50 @@ export async function addKpiTemplate(formData: FormData) {
   });
   
   revalidatePath("/admin");
+  revalidatePath("/board");
   return { ok: true };
 }
 
 export async function updateKpiWeightage(formData: FormData) {
-  const admin = await requireAdmin();
-  if (!admin) return;
+  const user = await getCurrentUser();
+  if (!user) return;
   const id = String(formData.get("id") || "");
   const weightage = Number(formData.get("weightage") || 0);
   if (!id) return;
   
+  const kpiDoc = await adminDb.collection("KpiTemplate").doc(id).get();
+  if (!kpiDoc.exists) return;
+  const kpi = kpiDoc.data()!;
+
+  const isAdmin = user.systemRole === "ADMIN" || user.systemRole === "CEO";
+  if (!isAdmin && kpi.roleId !== user.roleId) return;
+
   await adminDb.collection("KpiTemplate").doc(id).update({ weightage });
   
   revalidatePath("/admin");
+  revalidatePath("/board");
 }
 
 export async function deleteKpiTemplate(formData: FormData) {
-  const admin = await requireAdmin();
-  if (!admin) return;
+  const user = await getCurrentUser();
+  if (!user) return;
   const id = String(formData.get("id") || "");
   if (!id) return;
   
+  const kpiDoc = await adminDb.collection("KpiTemplate").doc(id).get();
+  if (!kpiDoc.exists) return;
+  const kpi = kpiDoc.data()!;
+
+  const isAdmin = user.systemRole === "ADMIN" || user.systemRole === "CEO";
+  if (!isAdmin && kpi.roleId !== user.roleId) return;
+
   const usedSnap = await adminDb.collection("MonthlyScore").where("kpiTemplateId", "==", id).limit(1).get();
   if (!usedSnap.empty) return;
   
   await adminDb.collection("KpiTemplate").doc(id).delete();
   
   revalidatePath("/admin");
+  revalidatePath("/board");
 }
 
 export async function createRole(formData: FormData) {

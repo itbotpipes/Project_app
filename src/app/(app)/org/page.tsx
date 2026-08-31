@@ -36,14 +36,19 @@ export default async function OrgChartPage({
   employees.sort((a: any, b: any) => a.name.localeCompare(b.name));
   const departments = departmentsMap.docs ? departmentsMap.docs.map((d: any) => ({ id: d.id, ...d.data() })) as any[] : [];
 
-  const topPerson = employees.find((e: any) => !e.reportsToId);
+  // Find the real top person (CEO / Director, or ADMIN/CEO system roles)
+  const topPerson = employees.find((e: any) => e.role?.title === "CEO / Director")
+    || employees.find((e: any) => e.systemRole === "CEO" || e.systemRole === "ADMIN")
+    || employees.find((e: any) => !e.reportsToId);
 
   const byManager = new Map<string, any[]>();
   for (const e of employees) {
-    if (e.reportsToId) {
-      const arr = byManager.get(e.reportsToId) ?? [];
+    if (e.id === topPerson?.id) continue;
+    const parentId = e.reportsToId || topPerson?.id;
+    if (parentId) {
+      const arr = byManager.get(parentId) ?? [];
       arr.push(e);
-      byManager.set(e.reportsToId, arr);
+      byManager.set(parentId, arr);
     }
   }
 
@@ -57,7 +62,7 @@ export default async function OrgChartPage({
     };
   }
 
-  const roots = employees ? employees.filter((e: any) => !e.reportsToId).map(buildTree) : [];
+  const roots = topPerson ? [buildTree(topPerson)] : [];
 
   const flatData: FlatOrgData = {
     root: topPerson ? { id: topPerson.id, name: topPerson.name, roleTitle: topPerson.role.title } : null,

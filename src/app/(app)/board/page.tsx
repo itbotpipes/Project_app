@@ -11,6 +11,7 @@ import KanbanBoard from "./KanbanBoard";
 import Celebration from "../_components/Celebration";
 import { loadTemplateOptions } from "@/lib/templates";
 import { batchFetchByIds, cachedFetch } from "@/lib/cache";
+import ManageKpisDialog from "./ManageKpisDialog";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -221,6 +222,7 @@ export default async function BoardPage({
         <SectionTitle
           action={
             <div className="flex items-center gap-2 text-xs">
+              <ManageKpisDialog kpis={kpiOptions} roleId={user.roleId} />
               {/* AutoRefresh removed — was triggering router.refresh() every 20 seconds,
                   re-running auth, alerts, and all Firestore queries for every user.
                   The board updates automatically after any action via revalidatePath(). */}
