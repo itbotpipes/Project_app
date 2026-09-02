@@ -44,9 +44,7 @@ export default async function BoardPage({
       .where("createdAt", ">=", startOfMonth)
       .get(),
     adminDb.collection("KpiTemplate").get(),
-    isManagerLike(user.systemRole)
-      ? cachedFetch("active-employees", () => adminDb.collection("Employee").where("active", "==", true).get(), 300)
-      : Promise.resolve({ docs: [] }),
+    cachedFetch("active-employees", () => adminDb.collection("Employee").where("active", "==", true).get(), 300),
     loadTemplateOptions(),
   ]);
 

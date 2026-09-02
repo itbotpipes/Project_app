@@ -33,9 +33,34 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   if (!taskDoc.exists) return null;
   const task = { id: taskDoc.id, ...taskDoc.data()! } as any;
 
-  const allowed =
+  let allowed =
     isManagerLike(viewer.systemRole) ||
     [task.creatorId, task.assigneeId, task.reviewerId].includes(viewer.id);
+
+  if (!allowed) {
+    const watcherSnap = await adminDb
+      .collection("TaskWatcher")
+      .where("taskId", "==", id)
+      .where("employeeId", "==", viewer.id)
+      .limit(1)
+      .get();
+    if (!watcherSnap.empty) {
+      allowed = true;
+    }
+  }
+
+  if (!allowed && task.groupId) {
+    const memberSnap = await adminDb
+      .collection("GroupMember")
+      .where("groupId", "==", task.groupId)
+      .where("employeeId", "==", viewer.id)
+      .limit(1)
+      .get();
+    if (!memberSnap.empty) {
+      allowed = true;
+    }
+  }
+
   if (!allowed) return null;
 
   // Fetch all related docs in parallel
