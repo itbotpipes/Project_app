@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { TASK_STATUS_ORDER, TASK_STATUS_LABEL, priorityQuadrant } from "@/lib/constants";
 import { Card, Badge, StatCard } from "../_components/ui";
@@ -53,13 +53,15 @@ export default async function AllTasksPage({
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  // Auth: Only Director/CEO/COO can view this page
+  // Auth: Director/CEO/COO (Executives) OR Managers can view this page
   const isExecutive =
     user.systemRole === "ADMIN" ||
     user.systemRole === "CEO" ||
     ["CEO / Director", "COO"].includes(user.role?.title);
 
-  if (!isExecutive) {
+  const isManager = isManagerLike(user);
+
+  if (!isExecutive && !isManager) {
     redirect("/");
   }
 
@@ -84,8 +86,8 @@ export default async function AllTasksPage({
   const rolesMap = new Map(rolesSnap.docs.map(doc => [doc.id, doc.data()]));
   const projectsMap = new Map(projectsSnap.docs.map(doc => [doc.id, doc.data().name]));
 
-  // Employees lookup
-  const employees = employeesSnap.docs.map(doc => {
+  // All active employees
+  const allEmployees = employeesSnap.docs.map(doc => {
     const data = doc.data();
     const role = data.roleId ? rolesMap.get(data.roleId) : null;
     const deptId = role ? (role as any).departmentId : null;
@@ -98,10 +100,27 @@ export default async function AllTasksPage({
       roleTitle: role ? (role as any).title : "No Role",
       departmentId: deptId,
       departmentName: deptName,
+      reportsToId: data.reportsToId || null,
+      reportsToIds: Array.isArray(data.reportsToIds) ? data.reportsToIds : [],
     };
   }).sort((a, b) => a.name.localeCompare(b.name));
 
-  const employeesMap = new Map(employees.map(e => [e.id, e]));
+  const employeesMap = new Map(allEmployees.map(e => [e.id, e]));
+
+  // Determine accessible employee set for filtering & visibility
+  let accessibleTeamIds: Set<string> | null = null;
+  if (!isExecutive) {
+    accessibleTeamIds = new Set<string>([user.id]);
+    allEmployees.forEach(e => {
+      if (e.reportsToId === user.id || e.reportsToIds.includes(user.id)) {
+        accessibleTeamIds!.add(e.id);
+      }
+    });
+  }
+
+  const dropdownEmployees = accessibleTeamIds
+    ? allEmployees.filter(e => accessibleTeamIds!.has(e.id))
+    : allEmployees;
 
   // Process all tasks
   const rawTasks = tasksSnap.docs
@@ -133,7 +152,14 @@ export default async function AllTasksPage({
         projectName: project || null,
       };
     })
-    .filter(t => !t.deletedAt); // Exclude deleted tasks
+    .filter(t => !t.deletedAt)
+    .filter(t => {
+      if (isExecutive || !accessibleTeamIds) return true;
+      // Managers see tasks assigned to their team (or themselves) OR created by them
+      const isAssignedToTeam = t.assignee ? accessibleTeamIds.has(t.assignee.id) : false;
+      const isCreatedByMe = t.creator ? t.creator.id === user.id : false;
+      return isAssignedToTeam || isCreatedByMe;
+    }); // Exclude deleted tasks
 
   // Compute stats before applying filters
   const totalTasks = rawTasks.length;
@@ -189,9 +215,13 @@ export default async function AllTasksPage({
     <div className="space-y-6">
       {/* Header */}
       <div>
-        <h1 className="text-2xl font-semibold text-slate-900">All Employee Tasks</h1>
+        <h1 className="text-2xl font-semibold text-slate-900">
+          {isExecutive ? "All Employee Tasks" : "Team & Employee Tasks"}
+        </h1>
         <p className="text-sm text-slate-500">
-          Executive monitoring board to review, search, and track all tasks across the company.
+          {isExecutive
+            ? "Executive monitoring board to review, search, and track all tasks across the company."
+            : "Manager monitoring board to review, search, and track tasks for your team and direct reports."}
         </p>
       </div>
 
@@ -264,7 +294,7 @@ export default async function AllTasksPage({
               className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
             >
               <option value="">All Employees</option>
-              {employees.map(e => (
+              {dropdownEmployees.map(e => (
                 <option key={e.id} value={e.id}>{e.name} ({e.roleTitle})</option>
               ))}
             </select>

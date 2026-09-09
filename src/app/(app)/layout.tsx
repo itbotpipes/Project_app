@@ -49,7 +49,8 @@ export default async function AppLayout({
             canViewAllTasks={
               user.systemRole === "ADMIN" ||
               user.systemRole === "CEO" ||
-              ["CEO / Director", "COO"].includes(user.role?.title)
+              ["CEO / Director", "COO"].includes(user.role?.title) ||
+              isManagerLike(user)
             }
           />
         </aside>
