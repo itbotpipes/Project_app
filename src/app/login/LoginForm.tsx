@@ -15,7 +15,7 @@ export default function LoginForm() {
           type="email"
           autoComplete="username"
           required
-          defaultValue="director@nse.local"
+          placeholder="you@company.com"
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         />
       </div>
@@ -26,7 +26,7 @@ export default function LoginForm() {
           type="password"
           autoComplete="current-password"
           required
-          defaultValue="password123"
+          placeholder="••••••••"
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
         />
       </div>

@@ -20,9 +20,6 @@ export default async function LoginPage() {
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <LoginForm />
         </div>
-        <p className="mt-4 text-center text-xs text-slate-400">
-          Demo login: <span className="font-medium">director@nse.local</span> / password123
-        </p>
       </div>
     </div>
   );
