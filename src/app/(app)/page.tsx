@@ -328,6 +328,78 @@ export default async function Dashboard() {
         openTaskCount={openTasks}
       />
 
+      {/* Thought of the day + announcements */}
+      {(thought || scorer) && (
+        <Card className="border-blue-100 bg-blue-50/50">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">
+              💭 Thought of the day{thought?.author ? ` — ${thought.author.name}` : ""}
+            </div>
+            {scorer && (
+              <Link href="/announcements" className="text-xs font-medium text-blue-600 hover:underline">
+                Edit ✎
+              </Link>
+            )}
+          </div>
+          <p className="mt-2 text-sm text-slate-700">
+            {thought?.body ?? <span className="text-slate-400">No thought set yet — click Edit to add one.</span>}
+          </p>
+          {notices.length > 0 && (
+            <div className="mt-5 space-y-3 border-t border-blue-100 pt-4">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400">
+                📢 Important Announcements
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                {notices.map((n) => (
+                  <div
+                    key={n.id}
+                    className="relative flex flex-col justify-between rounded-xl border border-slate-100 bg-white p-3.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
+                  >
+                    <div className="min-w-0">
+                      <div className="flex items-start justify-between gap-2">
+                        <h4 className="text-xs font-bold text-slate-800 truncate mb-1">
+                          {n.pinned && <span className="mr-1 text-amber-500">📌</span>}
+                          {n.title || "Announcement"}
+                        </h4>
+                        {n.pinned && (
+                          <span className="rounded bg-amber-50 px-1 py-0.5 text-[9px] font-medium text-amber-600">
+                            Pinned
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-xs text-slate-600 leading-relaxed font-normal whitespace-pre-wrap mt-1">
+                        {n.body}
+                      </p>
+                    </div>
+                    
+                    <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-2 text-[10px] text-slate-400">
+                      <span className="font-semibold text-slate-500">
+                        By {n.author?.name || "Management"}
+                      </span>
+                      {n.createdAt && (
+                        <span>
+                          {new Date(n.createdAt.toDate ? n.createdAt.toDate() : n.createdAt).toLocaleDateString("en-IN", {
+                            day: "numeric",
+                            month: "short",
+                          })}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          {thought && (
+            <ThoughtSocial
+              announcementId={thought.id}
+              reactions={thoughtReactions}
+              comments={thoughtComments}
+            />
+          )}
+        </Card>
+      )}
+
       {adherence && adherence.plannedCount > 0 && (
         <Card className={adherence.adHocDone > adherence.plannedDone ? "border-amber-200 bg-amber-50/50" : ""}>
           <div className="flex flex-wrap items-center gap-3 text-sm">
@@ -371,103 +443,6 @@ export default async function Dashboard() {
           value={<span className={band.className}>{band.label}</span>}
           sub={`6-mo avg ${avg.toFixed(0)}`}
         />
-      </div>
-
-      {/* Thought of the day + announcements + birthdays */}
-      <div className="grid gap-6 lg:grid-cols-3">
-        {(thought || scorer) && (
-          <Card className="lg:col-span-2 border-blue-100 bg-blue-50/50">
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold uppercase tracking-wide text-blue-500">
-                💭 Thought of the day{thought?.author ? ` — ${thought.author.name}` : ""}
-              </div>
-              {scorer && (
-                <Link href="/announcements" className="text-xs font-medium text-blue-600 hover:underline">
-                  Edit ✎
-                </Link>
-              )}
-            </div>
-            <p className="mt-2 text-sm text-slate-700">
-              {thought?.body ?? <span className="text-slate-400">No thought set yet — click Edit to add one.</span>}
-            </p>
-            {notices.length > 0 && (
-              <div className="mt-5 space-y-3 border-t border-blue-100 pt-4">
-                <div className="text-[10px] font-bold uppercase tracking-wider text-blue-400">
-                  📢 Important Announcements
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  {notices.map((n) => (
-                    <div
-                      key={n.id}
-                      className="relative flex flex-col justify-between rounded-xl border border-slate-100 bg-white p-3.5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md"
-                    >
-                      <div className="min-w-0">
-                        <div className="flex items-start justify-between gap-2">
-                          <h4 className="text-xs font-bold text-slate-800 truncate mb-1">
-                            {n.pinned && <span className="mr-1 text-amber-500">📌</span>}
-                            {n.title || "Announcement"}
-                          </h4>
-                          {n.pinned && (
-                            <span className="rounded bg-amber-50 px-1 py-0.5 text-[9px] font-medium text-amber-600">
-                              Pinned
-                            </span>
-                          )}
-                        </div>
-                        <p className="text-xs text-slate-600 leading-relaxed font-normal whitespace-pre-wrap mt-1">
-                          {n.body}
-                        </p>
-                      </div>
-                      
-                      <div className="mt-3 flex items-center justify-between border-t border-slate-50 pt-2 text-[10px] text-slate-400">
-                        <span className="font-semibold text-slate-500">
-                          By {n.author?.name || "Management"}
-                        </span>
-                        {n.createdAt && (
-                          <span>
-                            {new Date(n.createdAt.toDate ? n.createdAt.toDate() : n.createdAt).toLocaleDateString("en-IN", {
-                              day: "numeric",
-                              month: "short",
-                            })}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-            {thought && (
-              <ThoughtSocial
-                announcementId={thought.id}
-                reactions={thoughtReactions}
-                comments={thoughtComments}
-              />
-            )}
-          </Card>
-        )}
-        <Card>
-          <SectionTitle>🎂 Upcoming birthdays</SectionTitle>
-          <ul className="space-y-2">
-            {birthdays.map((b) => (
-              <li key={b.name} className="flex items-center justify-between text-sm">
-                <span className="font-medium">{b.name}</span>
-                <span className="text-slate-500">
-                  {b.inDays === 0 ? "Today! 🎉" : b.inDays === 1 ? "Tomorrow" : `in ${b.inDays} days`}
-                </span>
-              </li>
-            ))}
-            {!birthdays.length && <li className="text-sm text-slate-400">None in the next 3 weeks.</li>}
-          </ul>
-          {wishTarget && wishTarget.id && (
-            <BirthdayWishes
-              target={{ id: wishTarget.id, name: wishTarget.name }}
-              inDays={wishTarget.inDays}
-              people={allPeople}
-              wishes={wishes}
-              selfId={user.id}
-            />
-          )}
-        </Card>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -527,38 +502,65 @@ export default async function Dashboard() {
         </Card>
       </div>
 
-      {manager && (
+      <div className="grid gap-6 lg:grid-cols-3">
+        {/* Birthdays */}
         <Card>
-          <SectionTitle
-            action={
-              <Link href="/team" className="text-xs font-medium text-blue-600 hover:underline">
-                Open team view →
-              </Link>
-            }
-          >
-            Manager quick links
-          </SectionTitle>
-          <p className="text-sm text-slate-600">
-            You can see your team&apos;s tasks and scores under{" "}
-            <Link href="/team" className="text-blue-600 hover:underline">
-              My Team
-            </Link>
-            {scorer && (
-              <>
-                , enter monthly performance scores in the{" "}
-                <Link href="/scores" className="text-blue-600 hover:underline">
-                  Scoring Panel
-                </Link>
-              </>
-            )}
-            , and see the full company under{" "}
-            <Link href="/people" className="text-blue-600 hover:underline">
-              Directory
-            </Link>
-            .
-          </p>
+          <SectionTitle>🎂 Upcoming birthdays</SectionTitle>
+          <ul className="space-y-2">
+            {birthdays.map((b) => (
+              <li key={b.name} className="flex items-center justify-between text-sm">
+                <span className="font-medium">{b.name}</span>
+                <span className="text-slate-500">
+                  {b.inDays === 0 ? "Today! 🎉" : b.inDays === 1 ? "Tomorrow" : `in ${b.inDays} days`}
+                </span>
+              </li>
+            ))}
+            {!birthdays.length && <li className="text-sm text-slate-400">None in the next 3 weeks.</li>}
+          </ul>
+          {wishTarget && wishTarget.id && (
+            <BirthdayWishes
+              target={{ id: wishTarget.id, name: wishTarget.name }}
+              inDays={wishTarget.inDays}
+              people={allPeople}
+              wishes={wishes}
+              selfId={user.id}
+            />
+          )}
         </Card>
-      )}
+
+        {manager && (
+          <Card className="lg:col-span-2">
+            <SectionTitle
+              action={
+                <Link href="/team" className="text-xs font-medium text-blue-600 hover:underline">
+                  Open team view →
+                </Link>
+              }
+            >
+              Manager quick links
+            </SectionTitle>
+            <p className="text-sm text-slate-600">
+              You can see your team&apos;s tasks and scores under{" "}
+              <Link href="/team" className="text-blue-600 hover:underline">
+                My Team
+              </Link>
+              {scorer && (
+                <>
+                  , enter monthly performance scores in the{" "}
+                  <Link href="/scores" className="text-blue-600 hover:underline">
+                    Scoring Panel
+                  </Link>
+                </>
+              )}
+              , and see the full company under{" "}
+              <Link href="/people" className="text-blue-600 hover:underline">
+                Directory
+              </Link>
+              .
+            </p>
+          </Card>
+        )}
+      </div>
     </div>
   );
 }

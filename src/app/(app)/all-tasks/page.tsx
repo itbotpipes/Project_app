@@ -48,6 +48,9 @@ export default async function AllTasksPage({
     assigneeId?: string;
     status?: string;
     priority?: string;
+    dateType?: string;
+    fromDate?: string;
+    toDate?: string;
   }>;
 }) {
   const user = await getCurrentUser();
@@ -71,6 +74,9 @@ export default async function AllTasksPage({
   const filterAssigneeId = sp.assigneeId || "";
   const filterStatus = sp.status || "";
   const filterPriority = sp.priority || "";
+  const filterDateType = sp.dateType || "due";
+  const filterFromDate = sp.fromDate || "";
+  const filterToDate = sp.toDate || "";
 
   // Fetch all required data in parallel
   const [tasksSnap, employeesSnap, departmentsSnap, rolesSnap, projectsSnap] = await Promise.all([
@@ -205,11 +211,27 @@ export default async function AllTasksPage({
       return false;
     }
 
+    // Date filter
+    const targetDate = filterDateType === "created" ? t.createdAt : t.dueAt;
+    if (filterFromDate) {
+      if (!targetDate) return false;
+      const from = new Date(filterFromDate);
+      from.setHours(0, 0, 0, 0);
+      if (targetDate.getTime() < from.getTime()) return false;
+    }
+
+    if (filterToDate) {
+      if (!targetDate) return false;
+      const to = new Date(filterToDate);
+      to.setHours(23, 59, 59, 999);
+      if (targetDate.getTime() > to.getTime()) return false;
+    }
+
     return true;
   }).sort((a, b) => (b.createdAt?.getTime() || 0) - (a.createdAt?.getTime() || 0));
 
   // Determine if filters are active
-  const hasActiveFilters = !!(searchVal || filterDeptId || filterAssigneeId || filterStatus || filterPriority);
+  const hasActiveFilters = !!(searchVal || filterDeptId || filterAssigneeId || filterStatus || filterPriority || filterFromDate || filterToDate);
 
   return (
     <div className="space-y-6">
@@ -255,96 +277,133 @@ export default async function AllTasksPage({
 
       {/* Filter Bar */}
       <Card className="p-4">
-        <form method="GET" className="flex flex-col gap-3 md:flex-row md:items-end">
-          <div className="flex-1">
-            <label className="text-xs font-semibold text-slate-500">Search Tasks</label>
-            <div className="relative mt-1">
-              <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
-                <Search size={16} />
-              </span>
-              <input
-                type="text"
-                name="search"
-                defaultValue={searchVal}
-                placeholder="Search title, details, assignee..."
-                className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-              />
+        <form method="GET" className="space-y-3">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+            <div className="flex-1 min-w-[200px]">
+              <label className="text-xs font-semibold text-slate-500">Search Tasks</label>
+              <div className="relative mt-1">
+                <span className="absolute inset-y-0 left-0 flex items-center pl-3 text-slate-400">
+                  <Search size={16} />
+                </span>
+                <input
+                  type="text"
+                  name="search"
+                  defaultValue={searchVal}
+                  placeholder="Search title, details, assignee..."
+                  className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pl-9 pr-3 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+                />
+              </div>
+            </div>
+
+            <div className="w-full lg:w-44">
+              <label className="text-xs font-semibold text-slate-500">Department</label>
+              <select
+                name="departmentId"
+                defaultValue={filterDeptId}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              >
+                <option value="">All Departments</option>
+                {depts.map(d => (
+                  <option key={d.id} value={d.id}>{d.name}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="w-full lg:w-44">
+              <label className="text-xs font-semibold text-slate-500">Employee</label>
+              <select
+                name="assigneeId"
+                defaultValue={filterAssigneeId}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              >
+                <option value="">All Employees</option>
+                {dropdownEmployees.map(e => (
+                  <option key={e.id} value={e.id}>{e.name} ({e.roleTitle})</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="w-full lg:w-36">
+              <label className="text-xs font-semibold text-slate-500">Status</label>
+              <select
+                name="status"
+                defaultValue={filterStatus}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              >
+                <option value="">All Statuses</option>
+                {TASK_STATUS_ORDER.map(s => (
+                  <option key={s} value={s}>{TASK_STATUS_LABEL[s]}</option>
+                ))}
+              </select>
+            </div>
+
+            <div className="w-full lg:w-36">
+              <label className="text-xs font-semibold text-slate-500">Priority</label>
+              <select
+                name="priority"
+                defaultValue={filterPriority}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              >
+                <option value="">All Priorities</option>
+                <option value="Do First">Do First (Q1)</option>
+                <option value="Schedule">Schedule (Q2)</option>
+                <option value="Delegate">Delegate (Q3)</option>
+                <option value="Eliminate">Eliminate (Q4)</option>
+              </select>
             </div>
           </div>
 
-          <div className="w-full md:w-48">
-            <label className="text-xs font-semibold text-slate-500">Department</label>
-            <select
-              name="departmentId"
-              defaultValue={filterDeptId}
-              className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-            >
-              <option value="">All Departments</option>
-              {depts.map(d => (
-                <option key={d.id} value={d.id}>{d.name}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="w-full md:w-48">
-            <label className="text-xs font-semibold text-slate-500">Employee</label>
-            <select
-              name="assigneeId"
-              defaultValue={filterAssigneeId}
-              className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-            >
-              <option value="">All Employees</option>
-              {dropdownEmployees.map(e => (
-                <option key={e.id} value={e.id}>{e.name} ({e.roleTitle})</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="w-full md:w-40">
-            <label className="text-xs font-semibold text-slate-500">Status</label>
-            <select
-              name="status"
-              defaultValue={filterStatus}
-              className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-            >
-              <option value="">All Statuses</option>
-              {TASK_STATUS_ORDER.map(s => (
-                <option key={s} value={s}>{TASK_STATUS_LABEL[s]}</option>
-              ))}
-            </select>
-          </div>
-
-          <div className="w-full md:w-40">
-            <label className="text-xs font-semibold text-slate-500">Priority</label>
-            <select
-              name="priority"
-              defaultValue={filterPriority}
-              className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
-            >
-              <option value="">All Priorities</option>
-              <option value="Do First">Do First (Q1)</option>
-              <option value="Schedule">Schedule (Q2)</option>
-              <option value="Delegate">Delegate (Q3)</option>
-              <option value="Eliminate">Eliminate (Q4)</option>
-            </select>
-          </div>
-
-          <div className="flex gap-2">
-            <button
-              type="submit"
-              className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
-            >
-              <Filter size={16} /> Filter
-            </button>
-
-            {hasActiveFilters && (
-              <Link
-                href="/all-tasks"
-                className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-end border-t border-slate-100 pt-3">
+            <div className="w-full sm:w-36">
+              <label className="text-xs font-semibold text-slate-500">Date Target</label>
+              <select
+                name="dateType"
+                defaultValue={filterDateType}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white font-medium text-slate-700"
               >
-                <X size={16} />
-              </Link>
-            )}
+                <option value="due">Due Date</option>
+                <option value="created">Created Date</option>
+              </select>
+            </div>
+
+            <div className="w-full sm:w-44">
+              <label className="text-xs font-semibold text-slate-500">From Date</label>
+              <input
+                type="date"
+                name="fromDate"
+                defaultValue={filterFromDate}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              />
+            </div>
+
+            <div className="w-full sm:w-44">
+              <label className="text-xs font-semibold text-slate-500">To Date</label>
+              <input
+                type="date"
+                name="toDate"
+                defaultValue={filterToDate}
+                className="mt-1 block w-full rounded-xl border border-slate-200 bg-slate-50 p-2 text-sm outline-none transition focus:border-blue-500 focus:bg-white"
+              />
+            </div>
+
+            <div className="flex gap-2 sm:ml-auto pt-1 sm:pt-0">
+              <button
+                type="submit"
+                className="flex items-center justify-center gap-2 rounded-xl bg-blue-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-blue-700"
+              >
+                <Filter size={16} /> Filter
+              </button>
+
+              {hasActiveFilters && (
+                <Link
+                  href="/all-tasks"
+                  className="flex items-center justify-center gap-1 rounded-xl border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-600 transition hover:bg-slate-100"
+                  title="Clear Filters"
+                >
+                  <X size={16} />
+                </Link>
+              )}
+            </div>
           </div>
         </form>
       </Card>

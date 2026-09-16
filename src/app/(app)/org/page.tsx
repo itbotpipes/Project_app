@@ -3,8 +3,8 @@ import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { cn } from "@/lib/cn";
 import { Card } from "../_components/ui";
-import OrgNode, { type OrgPerson } from "./OrgNode";
 import FlatOrgChart, { type FlatOrgData } from "./FlatOrgChart";
+import InteractiveOrgChain from "./InteractiveOrgChain";
 import { batchFetchByIds, fetchAllDepartments } from "@/lib/cache";
 
 export default async function OrgChartPage({
@@ -16,6 +16,12 @@ export default async function OrgChartPage({
   if (!user) return null;
   const sp = await searchParams;
   const view = sp.view === "chain" ? "chain" : "flat";
+
+  const isExecutiveOrManager =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.systemRole === "MANAGER" ||
+    ["CEO / Director", "COO"].includes(user.role?.title);
 
   const [employeesSnap, departmentsMap] = await Promise.all([
     adminDb.collection("Employee").where("active", "==", true).get(),
@@ -41,28 +47,13 @@ export default async function OrgChartPage({
     || employees.find((e: any) => e.systemRole === "CEO" || e.systemRole === "ADMIN")
     || employees.find((e: any) => !e.reportsToId);
 
-  const byManager = new Map<string, any[]>();
-  for (const e of employees) {
-    if (e.id === topPerson?.id) continue;
-    const parentId = e.reportsToId || topPerson?.id;
-    if (parentId) {
-      const arr = byManager.get(parentId) ?? [];
-      arr.push(e);
-      byManager.set(parentId, arr);
-    }
-  }
-
-  function buildTree(e: any): any {
-    return {
-      id: e.id,
-      name: e.name,
-      roleTitle: e.role.title,
-      avatarUrl: e.avatarUrl,
-      children: (byManager.get(e.id) ?? []).map(buildTree),
-    };
-  }
-
-  const roots = topPerson ? [buildTree(topPerson)] : [];
+  const rawEmployees = employees.map((e: any) => ({
+    id: e.id,
+    name: e.name,
+    roleTitle: e.role.title,
+    reportsToId: e.reportsToId || null,
+    avatarUrl: e.avatarUrl || null,
+  }));
 
   const flatData: FlatOrgData = {
     root: topPerson ? { id: topPerson.id, name: topPerson.name, roleTitle: topPerson.role.title } : null,
@@ -106,11 +97,11 @@ export default async function OrgChartPage({
         {view === "flat" ? (
           <FlatOrgChart data={flatData} />
         ) : (
-          <div className="min-w-max space-y-4">
-            {roots.map((r: any) => (
-              <OrgNode key={r.id} node={r} />
-            ))}
-          </div>
+          <InteractiveOrgChain
+            employees={rawEmployees}
+            topPersonId={topPerson?.id || null}
+            canEdit={isExecutiveOrManager}
+          />
         )}
       </Card>
     </div>

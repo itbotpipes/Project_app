@@ -371,3 +371,75 @@ export async function createSystemRole(formData: FormData) {
   revalidatePath("/admin");
   return { ok: true };
 }
+
+export async function reassignReportingLine(employeeId: string, newReportsToId: string | null) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const isExecutiveOrManager =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.systemRole === "MANAGER" ||
+    ["CEO / Director", "COO"].includes(user.role?.title);
+
+  if (!isExecutiveOrManager) {
+    return { error: "Only managers and executives can reassign reporting lines." };
+  }
+
+  if (employeeId === newReportsToId) {
+    return { error: "An employee cannot report to themselves." };
+  }
+
+  const empRef = adminDb.collection("Employee").doc(employeeId);
+  const empDoc = await empRef.get();
+  if (!empDoc.exists) return { error: "Employee not found." };
+  const empData = empDoc.data() as any;
+
+  // Prevent CEO / Top Director from being reassigned away if they are root
+  if (empData.roleId) {
+    const roleSnap = await adminDb.collection("Role").doc(empData.roleId).get();
+    if (roleSnap.exists && roleSnap.data()?.title === "CEO / Director" && newReportsToId) {
+      return { error: "The CEO / Director cannot be assigned to report to someone else." };
+    }
+  }
+
+  // Cycle check: verify newReportsToId is not a descendant of employeeId
+  if (newReportsToId) {
+    const allEmpsSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+    const allEmps = allEmpsSnap.docs.map(d => ({ id: d.id, reportsToId: d.data().reportsToId }));
+    
+    // Check if newReportsToId eventually traces back to employeeId
+    let curr: string | null = newReportsToId;
+    const visited = new Set<string>();
+    while (curr) {
+      if (curr === employeeId) {
+        return { error: "Circular reporting loop detected. A manager cannot report to their own subordinate." };
+      }
+      if (visited.has(curr)) break; // graph cycle protection
+      visited.add(curr);
+      const parent = allEmps.find(e => e.id === curr);
+      curr = parent?.reportsToId || null;
+    }
+  }
+
+  // Update employee reporting line
+  await empRef.update({
+    reportsToId: newReportsToId,
+    reportsToIds: newReportsToId ? [newReportsToId] : [],
+    updatedAt: new Date(),
+  });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "employee.reassignManager",
+    entity: "Employee",
+    entityId: employeeId,
+    detail: `Reassigned ${empData.name}'s manager to ${newReportsToId || "None"}`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/admin");
+  return { ok: true };
+}

@@ -22,9 +22,14 @@ export async function register() {
     try {
       // Lazy load dailyJobs only when actually running to avoid ES module issues
       // with firebase-admin during instrumentation hook initialization
-      const { runDailyJobs } = await import("@/lib/jobs/dailyJobs");
-      const result = await runDailyJobs();
-      console.log(`[scheduler] daily jobs ran: ${result.carried} task(s) carried forward`);
+      const jobsModule = await import("@/lib/jobs/dailyJobs");
+      const runDailyJobs = jobsModule.runDailyJobs || (jobsModule as any).default?.runDailyJobs;
+      if (typeof runDailyJobs === "function") {
+        const result = await runDailyJobs();
+        console.log(`[scheduler] daily jobs ran: ${result.carried} task(s) carried forward`);
+      } else {
+        console.error("[scheduler] runDailyJobs export not found in dailyJobs module");
+      }
     } catch (err) {
       console.error("[scheduler] daily jobs failed:", err);
     }
