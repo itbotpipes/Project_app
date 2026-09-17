@@ -51,7 +51,14 @@ export default async function BoardPage({
   const allKpis = kpiOptionsSnap.docs
     ? kpiOptionsSnap.docs
         .sort((a, b) => (a.data().orderIndex ?? 0) - (b.data().orderIndex ?? 0))
-        .map(d => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName, roleId: d.data().roleId }))
+        .map(d => ({
+          id: d.id,
+          kpiName: d.data().kpiName,
+          kraName: d.data().kraName,
+          roleId: d.data().roleId,
+          weightage: d.data().weightage ?? 0,
+          isPrimary: d.data().isPrimary ?? true,
+        }))
     : [];
   const kpiOptions = allKpis.filter(k => k.roleId === user.roleId);
 

@@ -306,7 +306,12 @@ export default async function GroupDetailPage({
           <SectionTitle>Group Announcements</SectionTitle>
           <div className="space-y-4">
             {canManage && (
-              <form action={createGroupAnnouncement} className="flex gap-2">
+              <form
+                action={async (fd) => {
+                  await createGroupAnnouncement(fd);
+                }}
+                className="flex gap-2"
+              >
                 <input type="hidden" name="groupId" value={group.id} />
                 <input
                   name="body"

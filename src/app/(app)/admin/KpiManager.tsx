@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import { Plus, Trash2 } from "lucide-react";
 import { addKpiTemplate, updateKpiWeightage, deleteKpiTemplate } from "@/lib/actions/admin";
 
@@ -9,8 +9,21 @@ type Kpi = { id: string; roleId: string; kraName: string; kpiName: string; weigh
 
 export default function KpiManager({ roles, kpis }: { roles: Role[]; kpis: Kpi[] }) {
   const [roleId, setRoleId] = useState(roles[0]?.id ?? "");
+  const [isPending, startTransition] = useTransition();
   const list = useMemo(() => kpis.filter((k) => k.roleId === roleId), [kpis, roleId]);
   const total = list.reduce((s, k) => s + k.weightage, 0);
+
+  const handleDelete = (id: string, name: string) => {
+    if (!window.confirm(`Are you sure you want to delete the KPI bucket "${name}"?`)) return;
+    const fd = new FormData();
+    fd.set("id", id);
+    startTransition(async () => {
+      const res = await deleteKpiTemplate(fd);
+      if (res?.error) {
+        alert(res.error);
+      }
+    });
+  };
 
   return (
     <div>
@@ -47,12 +60,15 @@ export default function KpiManager({ roles, kpis }: { roles: Role[]; kpis: Kpi[]
               />
               <button className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100">Save</button>
             </form>
-            <form action={deleteKpiTemplate}>
-              <input type="hidden" name="id" value={k.id} />
-              <button className="rounded-md p-1 text-slate-400 hover:bg-red-50 hover:text-red-600" title="Delete (only if unused)">
-                <Trash2 size={15} />
-              </button>
-            </form>
+            <button
+              type="button"
+              onClick={() => handleDelete(k.id, k.kpiName)}
+              disabled={isPending}
+              className="rounded-md p-1.5 text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors disabled:opacity-50"
+              title="Delete KPI bucket"
+            >
+              <Trash2 size={15} />
+            </button>
           </div>
         ))}
         {!list.length && <p className="text-sm text-slate-400">No KPIs for this role yet.</p>}
@@ -76,3 +92,4 @@ export default function KpiManager({ roles, kpis }: { roles: Role[]; kpis: Kpi[]
     </div>
   );
 }
+

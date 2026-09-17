@@ -195,24 +195,59 @@ export async function updateKpiWeightage(formData: FormData) {
 
 export async function deleteKpiTemplate(formData: FormData) {
   const user = await getCurrentUser();
-  if (!user) return;
+  if (!user) return { error: "Not authorized" };
   const id = String(formData.get("id") || "");
-  if (!id) return;
+  if (!id) return { error: "KPI ID is required" };
   
   const kpiDoc = await adminDb.collection("KpiTemplate").doc(id).get();
-  if (!kpiDoc.exists) return;
+  if (!kpiDoc.exists) return { error: "KPI template not found" };
   const kpi = kpiDoc.data()!;
 
-  const isAdmin = user.systemRole === "ADMIN" || user.systemRole === "CEO";
-  if (!isAdmin && kpi.roleId !== user.roleId) return;
+  const isAdmin =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.role?.title === "CEO / Director" ||
+    user.role?.title === "COO";
 
-  const usedSnap = await adminDb.collection("MonthlyScore").where("kpiTemplateId", "==", id).limit(1).get();
-  if (!usedSnap.empty) return;
+  if (!isAdmin && kpi.roleId !== user.roleId) return { error: "Not authorized to delete this KPI" };
+
+  // Unlink tasks and scores if admin/CEO is deleting
+  const [usedScoreSnap, usedTaskSnap] = await Promise.all([
+    adminDb.collection("MonthlyScore").where("kpiTemplateId", "==", id).get(),
+    adminDb.collection("Task").where("kpiTemplateId", "==", id).get(),
+  ]);
+
+  if (!usedScoreSnap.empty || !usedTaskSnap.empty) {
+    if (isAdmin) {
+      if (!usedTaskSnap.empty) {
+        const tasksBatch = adminDb.batch();
+        usedTaskSnap.docs.forEach((d) => tasksBatch.update(d.ref, { kpiTemplateId: null }));
+        await tasksBatch.commit();
+      }
+      if (!usedScoreSnap.empty) {
+        const scoreBatch = adminDb.batch();
+        usedScoreSnap.docs.forEach((d) => scoreBatch.delete(d.ref));
+        await scoreBatch.commit();
+      }
+    } else {
+      return { error: "Cannot delete KPI bucket because tasks or monthly scores are linked to it." };
+    }
+  }
   
   await adminDb.collection("KpiTemplate").doc(id).delete();
-  
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "kpi.delete",
+    entity: "KpiTemplate",
+    entityId: id,
+    detail: `${kpi.kpiName} (${kpi.kraName})`,
+    createdAt: new Date(),
+  });
+
   revalidatePath("/admin");
   revalidatePath("/board");
+  return { ok: true };
 }
 
 export async function createRole(formData: FormData) {

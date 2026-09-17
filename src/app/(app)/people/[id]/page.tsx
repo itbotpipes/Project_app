@@ -18,10 +18,10 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
   const empDoc = await adminDb.collection("Employee").doc(id).get();
   if (!empDoc.exists) notFound();
   
-  let roleData: any = { title: "Unknown", department: null };
-  const reportsToIds = rawEmp.reportsToIds || (rawEmp.reportsToId ? [rawEmp.reportsToId] : []);
-  let reportsToName: string | null = null;
   const rawEmpData = empDoc.data()!;
+  let roleData: any = { title: "Unknown", department: null };
+  const reportsToIds = rawEmpData.reportsToIds || (rawEmpData.reportsToId ? [rawEmpData.reportsToId] : []);
+  let reportsToName: string | null = null;
 
   const [roleDoc, reportsToDocs] = await Promise.all([
     rawEmpData.roleId ? adminDb.collection("Role").doc(rawEmpData.roleId).get() : Promise.resolve(null),

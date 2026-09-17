@@ -78,11 +78,11 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
   if (!remindersSnap.empty) {
     const remDocs = remindersSnap.docs;
     // Fetch task titles in parallel for reminders that don't have a cached title
-    const needsTitle = remDocs.filter(r => !r.data().taskTitle);
+    const needsTitle = remDocs.filter((r: any) => !r.data().taskTitle);
     let taskTitles = new Map<string, string>();
     if (needsTitle.length > 0) {
       const taskDocs = await Promise.all(
-        needsTitle.map(r => adminDb.collection("Task").doc(r.data().taskId).get())
+        needsTitle.map((r: any) => adminDb.collection("Task").doc(r.data().taskId).get())
       );
       taskDocs.forEach(td => {
         if (td.exists) taskTitles.set(td.id, td.data()!.title);

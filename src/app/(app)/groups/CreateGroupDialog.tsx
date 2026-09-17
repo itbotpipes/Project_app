@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 import { createGroup } from "@/lib/actions/groups";
 
 type Dept = { id: string; name: string };
@@ -10,7 +10,12 @@ type Person = { id: string; name: string };
 export default function CreateGroupDialog({ departments, people }: { departments: Dept[]; people: Person[] }) {
   const [open, setOpen] = useState(false);
   const [memberIds, setMemberIds] = useState<string[]>([]);
+  const [memberSearch, setMemberSearch] = useState("");
   const nameById = new Map(people.map((p) => [p.id, p.name]));
+
+  const filteredPeople = people.filter((p) =>
+    p.name.toLowerCase().includes(memberSearch.toLowerCase())
+  );
 
   return (
     <>
@@ -34,6 +39,7 @@ export default function CreateGroupDialog({ departments, people }: { departments
                 await createGroup(fd);
                 setOpen(false);
                 setMemberIds([]);
+                setMemberSearch("");
               }}
               className="space-y-3"
             >
@@ -63,12 +69,21 @@ export default function CreateGroupDialog({ departments, people }: { departments
                 </label>
               )}
               <div>
-                <p className="mb-1 text-xs font-medium text-slate-600">Members</p>
+                <div className="mb-1.5 flex items-center justify-between">
+                  <p className="text-xs font-medium text-slate-600">Members</p>
+                  {memberIds.length > 0 && (
+                    <span className="text-[11px] font-semibold text-emerald-600">
+                      {memberIds.length} selected
+                    </span>
+                  )}
+                </div>
+
                 {memberIds.map((id) => (
                   <input key={id} type="hidden" name="memberIds" value={id} />
                 ))}
+
                 {memberIds.length > 0 && (
-                  <div className="mb-1.5 flex flex-wrap gap-1">
+                  <div className="mb-2 flex flex-wrap gap-1 max-h-24 overflow-y-auto p-1 bg-slate-50 rounded-lg border border-slate-100">
                     {memberIds.map((id) => (
                       <span key={id} className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs text-emerald-700">
                         {nameById.get(id)}
@@ -79,27 +94,59 @@ export default function CreateGroupDialog({ departments, people }: { departments
                     ))}
                   </div>
                 )}
-                <div className="max-h-32 overflow-y-auto rounded-lg border border-slate-200 p-1">
-                  {people.map((p) => (
+
+                {/* Member Search Bar */}
+                <div className="relative mb-2">
+                  <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+                  <input
+                    type="text"
+                    value={memberSearch}
+                    onChange={(e) => setMemberSearch(e.target.value)}
+                    placeholder="Search members..."
+                    className="w-full rounded-lg border border-slate-200 pl-8 pr-3 py-1.5 text-xs outline-none focus:border-emerald-500 bg-slate-50"
+                  />
+                  {memberSearch && (
                     <button
-                      key={p.id}
                       type="button"
-                      onClick={() => setMemberIds((m) => (m.includes(p.id) ? m.filter((x) => x !== p.id) : [...m, p.id]))}
-                      className={
-                        memberIds.includes(p.id)
-                          ? "block w-full rounded px-2 py-1 text-left text-sm text-emerald-700 bg-emerald-50"
-                          : "block w-full rounded px-2 py-1 text-left text-sm text-slate-600 hover:bg-slate-50"
-                      }
+                      onClick={() => setMemberSearch("")}
+                      className="absolute right-2 top-2 text-xs text-slate-400 hover:text-slate-600"
                     >
-                      {p.name}
+                      ×
                     </button>
-                  ))}
+                  )}
+                </div>
+
+                <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 p-1 divide-y divide-slate-100">
+                  {filteredPeople.map((p) => {
+                    const isSelected = memberIds.includes(p.id);
+                    return (
+                      <button
+                        key={p.id}
+                        type="button"
+                        onClick={() => setMemberIds((m) => (m.includes(p.id) ? m.filter((x) => x !== p.id) : [...m, p.id]))}
+                        className={
+                          isSelected
+                            ? "flex items-center justify-between w-full rounded px-2.5 py-1.5 text-left text-xs font-medium text-emerald-700 bg-emerald-50/80"
+                            : "flex items-center justify-between w-full rounded px-2.5 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50"
+                        }
+                      >
+                        <span>{p.name}</span>
+                        {isSelected && <span className="text-emerald-600 text-xs">✓</span>}
+                      </button>
+                    );
+                  })}
+                  {filteredPeople.length === 0 && (
+                    <p className="px-2 py-3 text-center text-xs text-slate-400">No members found matching &quot;{memberSearch}&quot;</p>
+                  )}
                 </div>
               </div>
               <div className="mt-2 flex justify-end gap-2">
                 <button
                   type="button"
-                  onClick={() => setOpen(false)}
+                  onClick={() => {
+                    setOpen(false);
+                    setMemberSearch("");
+                  }}
                   className="rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-600 hover:bg-slate-100"
                 >
                   Cancel
@@ -118,3 +165,4 @@ export default function CreateGroupDialog({ departments, people }: { departments
     </>
   );
 }
+

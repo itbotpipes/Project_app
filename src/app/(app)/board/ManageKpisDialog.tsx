@@ -84,15 +84,20 @@ export default function ManageKpisDialog({ kpis, roleId }: { kpis: Kpi[]; roleId
                       Save
                     </button>
                   </form>
-                  <form action={deleteKpiTemplate}>
-                    <input type="hidden" name="id" value={k.id} />
-                    <button
-                      className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
-                      title="Delete bucket (if unused)"
-                    >
-                      <Trash2 size={15} />
-                    </button>
-                  </form>
+                  <button
+                    type="button"
+                    onClick={async () => {
+                      if (!window.confirm(`Are you sure you want to delete "${k.kpiName}"?`)) return;
+                      const fd = new FormData();
+                      fd.set("id", k.id);
+                      const res = await deleteKpiTemplate(fd);
+                      if (res?.error) alert(res.error);
+                    }}
+                    className="rounded-lg p-1 text-slate-400 hover:bg-red-50 hover:text-red-600 transition-colors"
+                    title="Delete bucket"
+                  >
+                    <Trash2 size={15} />
+                  </button>
                 </div>
               ))}
               {!kpis.length && (

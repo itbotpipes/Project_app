@@ -48,9 +48,10 @@ export async function createTask(formData: FormData) {
     }
   }
   
+  const rawAssigneeIds = formData.getAll("assigneeIds").map(String).filter(Boolean);
   const assignees = (assigneeId === "ALL_MEMBERS" && groupMemberIds.length > 0)
     ? groupMemberIds
-    : [assigneeId];
+    : (rawAssigneeIds.length > 0 ? rawAssigneeIds : [assigneeId]);
 
   let firstId = null;
 

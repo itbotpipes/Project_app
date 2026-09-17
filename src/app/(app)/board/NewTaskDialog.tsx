@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Plus, ListChecks, X, FileStack } from "lucide-react";
+import { Plus, ListChecks, X, FileStack, Search, Check } from "lucide-react";
 import { createTask } from "@/lib/actions/tasks";
 import BucketFill from "../_components/BucketFill";
 import DateTimePicker from "../_components/DateTimePicker";
@@ -43,7 +43,8 @@ export default function NewTaskDialog({
   const [selectedKpi, setSelectedKpi] = useState("");
   const [sizeLabel, setSizeLabel] = useState("");
   const [category, setCategory] = useState("");
-  const [assigneeId, setAssigneeId] = useState(selfId);
+  const [assigneeIds, setAssigneeIds] = useState<string[]>([selfId]);
+  const [assigneeSearch, setAssigneeSearch] = useState("");
   const [priority, setPriority] = useState<"high" | "important-only" | "urgent-only" | "low">("low");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const urgent = priority === "high" || priority === "urgent-only";
@@ -57,9 +58,13 @@ export default function NewTaskDialog({
   const [watcherIds, setWatcherIds] = useState<string[]>([]);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
-  const assigneeRoleId = people.find((p) => p.id === assigneeId)?.roleId;
-  const filteredKpiOptions = kpiOptions.filter((k) => !k.roleId || k.roleId === assigneeRoleId);
-  const templatesForAssignee = (templates ?? []).filter((t) => !t.roleId || t.roleId === assigneeRoleId);
+  const firstAssigneeRoleId = people.find((p) => assigneeIds.includes(p.id))?.roleId;
+  const filteredKpiOptions = kpiOptions.filter((k) => !k.roleId || k.roleId === firstAssigneeRoleId);
+  const templatesForAssignee = (templates ?? []).filter((t) => !t.roleId || t.roleId === firstAssigneeRoleId);
+
+  const filteredPeople = people.filter((p) =>
+    p.name.toLowerCase().includes(assigneeSearch.toLowerCase())
+  );
 
   function applyTemplate(templateId: string) {
     const t = (templates ?? []).find((x) => x.id === templateId);
@@ -88,7 +93,8 @@ export default function NewTaskDialog({
     setSelectedKpi("");
     setSizeLabel("");
     setCategory("");
-    setAssigneeId(selfId);
+    setAssigneeIds([selfId]);
+    setAssigneeSearch("");
     setPriority("low");
     setShowChecklist(false);
     setChecklist([]);
@@ -97,6 +103,12 @@ export default function NewTaskDialog({
     setWatcherIds([]);
     setErrorMsg(null);
   }
+
+  const toggleAssignee = (id: string) => {
+    setAssigneeIds((prev) =>
+      prev.includes(id) ? (prev.length > 1 ? prev.filter((x) => x !== id) : prev) : [...prev, id]
+    );
+  };
 
   return (
     <>
@@ -284,32 +296,105 @@ export default function NewTaskDialog({
                     />
                   </div>
                 )}
-                <label className="col-span-2 text-xs font-medium text-slate-600">
-                  Assign to
-                  <select
-                    name="assigneeId"
-                    value={assigneeId}
-                    onChange={(e) => {
-                      const nextAssigneeId = e.target.value;
-                      setAssigneeId(nextAssigneeId);
-                      
-                      // Reset selected KPI if it's not applicable to the new assignee
-                      const nextRoleId = people.find((p) => p.id === nextAssigneeId)?.roleId;
-                      const nextKpiOpts = kpiOptions.filter((k) => !k.roleId || k.roleId === nextRoleId);
-                      if (!nextKpiOpts.some(k => k.id === selectedKpi)) {
-                        setSelectedKpi("");
-                      }
-                    }}
-                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
-                  >
-                    {groupId && <option value="ALL_MEMBERS">Whole Group Team</option>}
-                    {people.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+
+                {/* Multi-Select Assignee Section with Search Bar */}
+                <div className="col-span-2 rounded-xl border border-slate-200 bg-slate-50/50 p-3">
+                  <div className="mb-2 flex items-center justify-between">
+                    <label className="text-xs font-semibold text-slate-700">
+                      Assign to <span className="font-normal text-slate-500">(Multi-select enabled)</span>
+                    </label>
+                    <span className="text-[11px] font-semibold text-blue-600">
+                      {assigneeIds.length} person{assigneeIds.length === 1 ? "" : "s"} selected
+                    </span>
+                  </div>
+
+                  {/* Form hidden inputs */}
+                  {assigneeIds.map((id) => (
+                    <input key={id} type="hidden" name="assigneeIds" value={id} />
+                  ))}
+                  <input type="hidden" name="assigneeId" value={assigneeIds[0] || selfId} />
+
+                  {/* Selected Assignees Chips */}
+                  {assigneeIds.length > 0 && (
+                    <div className="mb-2 flex flex-wrap gap-1 max-h-20 overflow-y-auto p-1.5 bg-white rounded-lg border border-slate-200">
+                      {assigneeIds.map((id) => (
+                        <span key={id} className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-700">
+                          {nameById.get(id) || "Assignee"}
+                          {assigneeIds.length > 1 && (
+                            <button
+                              type="button"
+                              onClick={() => toggleAssignee(id)}
+                              className="text-blue-500 hover:text-red-500 ml-0.5"
+                            >
+                              ×
+                            </button>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Member Search Bar */}
+                  <div className="relative mb-2">
+                    <Search size={14} className="absolute left-2.5 top-2.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={assigneeSearch}
+                      onChange={(e) => setAssigneeSearch(e.target.value)}
+                      placeholder="Search member..."
+                      className="w-full rounded-lg border border-slate-300 bg-white pl-8 pr-7 py-1.5 text-xs outline-none focus:border-blue-500"
+                    />
+                    {assigneeSearch && (
+                      <button
+                        type="button"
+                        onClick={() => setAssigneeSearch("")}
+                        className="absolute right-2 top-2 text-xs text-slate-400 hover:text-slate-600"
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Scrollable Members List */}
+                  <div className="max-h-36 overflow-y-auto rounded-lg border border-slate-200 bg-white divide-y divide-slate-100">
+                    {groupId && (
+                      <button
+                        type="button"
+                        onClick={() => setAssigneeIds(people.map((p) => p.id))}
+                        className="flex items-center justify-between w-full px-3 py-1.5 text-left text-xs font-semibold text-blue-600 hover:bg-blue-50"
+                      >
+                        <span>Select Whole Group Team ({people.length} people)</span>
+                        {assigneeIds.length === people.length && <Check size={14} className="text-blue-600" />}
+                      </button>
+                    )}
+                    {filteredPeople.map((p) => {
+                      const isSelected = assigneeIds.includes(p.id);
+                      return (
+                        <button
+                          key={p.id}
+                          type="button"
+                          onClick={() => toggleAssignee(p.id)}
+                          className={
+                            isSelected
+                              ? "flex items-center justify-between w-full px-3 py-1.5 text-left text-xs font-medium text-blue-700 bg-blue-50/80"
+                              : "flex items-center justify-between w-full px-3 py-1.5 text-left text-xs text-slate-600 hover:bg-slate-50"
+                          }
+                        >
+                          <span>{p.name}</span>
+                          <span className={isSelected ? "text-blue-600 font-bold" : "text-slate-300"}>
+                            {isSelected ? "✓" : "○"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                    {filteredPeople.length === 0 && (
+                      <p className="px-3 py-2 text-center text-xs text-slate-400">
+                        No members matching &quot;{assigneeSearch}&quot;
+                      </p>
+                    )}
+                  </div>
+                </div>
+
                 <label className="text-xs font-medium text-slate-600">
                   Priority
                   <select

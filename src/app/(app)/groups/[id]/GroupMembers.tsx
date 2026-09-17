@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { UserPlus } from "lucide-react";
+import { UserPlus, Search } from "lucide-react";
 import { addGroupMember, removeGroupMember } from "@/lib/actions/groups";
 
 type Member = { id: string; name: string; role: string };
@@ -20,11 +20,14 @@ export default function GroupMembers({
   canManage: boolean;
 }) {
   const [picker, setPicker] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const [, startTransition] = useTransition();
   const router = useRouter();
 
   const memberIds = new Set(members.map((m) => m.id));
-  const nonMembers = allPeople.filter((p) => !memberIds.has(p.id));
+  const nonMembers = allPeople.filter(
+    (p) => !memberIds.has(p.id) && p.name.toLowerCase().includes(searchTerm.toLowerCase())
+  );
 
   return (
     <div>
@@ -61,7 +64,10 @@ export default function GroupMembers({
         {canManage && (
           <button
             type="button"
-            onClick={() => setPicker((p) => !p)}
+            onClick={() => {
+              setPicker((p) => !p);
+              setSearchTerm("");
+            }}
             className="inline-flex items-center gap-1 rounded-full border border-dashed border-slate-300 px-2 py-1 text-xs text-slate-500 hover:bg-slate-50"
           >
             <UserPlus size={12} /> Add
@@ -69,29 +75,48 @@ export default function GroupMembers({
         )}
       </div>
       {picker && (
-        <div className="mt-2 max-h-32 w-56 overflow-y-auto rounded-lg border border-slate-200 p-1">
-          {nonMembers.map((p) => (
-            <button
-              key={p.id}
-              type="button"
-              onClick={() => {
-                const fd = new FormData();
-                fd.set("groupId", groupId);
-                fd.set("employeeId", p.id);
-                startTransition(async () => {
-                  await addGroupMember(fd);
-                  router.refresh();
-                });
-                setPicker(false);
-              }}
-              className="block w-full rounded px-2 py-1 text-left text-sm text-slate-600 hover:bg-emerald-50"
-            >
-              {p.name}
-            </button>
-          ))}
-          {!nonMembers.length && <p className="px-2 py-1 text-xs text-slate-400">Everyone is already in this group.</p>}
+        <div className="mt-2 w-64 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+          <div className="relative mb-1.5">
+            <Search size={13} className="absolute left-2 top-2 text-slate-400" />
+            <input
+              type="text"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Search member..."
+              className="w-full rounded border border-slate-200 pl-7 pr-2 py-1 text-xs outline-none focus:border-emerald-500"
+              autoFocus
+            />
+          </div>
+          <div className="max-h-36 overflow-y-auto divide-y divide-slate-100">
+            {nonMembers.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                onClick={() => {
+                  const fd = new FormData();
+                  fd.set("groupId", groupId);
+                  fd.set("employeeId", p.id);
+                  startTransition(async () => {
+                    await addGroupMember(fd);
+                    router.refresh();
+                  });
+                  setPicker(false);
+                  setSearchTerm("");
+                }}
+                className="block w-full rounded px-2 py-1 text-left text-xs text-slate-600 hover:bg-emerald-50"
+              >
+                {p.name}
+              </button>
+            ))}
+            {!nonMembers.length && (
+              <p className="px-2 py-1 text-xs text-slate-400">
+                {searchTerm ? "No member matches search." : "Everyone is already in this group."}
+              </p>
+            )}
+          </div>
         </div>
       )}
     </div>
   );
 }
+
