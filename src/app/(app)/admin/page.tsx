@@ -210,21 +210,8 @@ export default async function AdminPage() {
         />
       </Card>
 
-      {staleTasks.length > 0 && (
-        <Card className="border-red-100 bg-red-50/40">
-          <SectionTitle>🚨 Stale tasks — 7+ days untouched (department-head escalation)</SectionTitle>
-          <ul className="space-y-1.5">
-            {staleTasks.map((t) => (
-              <li key={t.id} className="flex items-center justify-between text-sm">
-                <TaskLink taskId={t.id} className="truncate hover:text-blue-600 hover:underline">{t.title}</TaskLink>
-                <span className="ml-2 shrink-0 text-xs text-slate-500">
-                  {t.assignee.name} · last touched {t.updatedAt.toLocaleDateString()}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </Card>
-      )}
+     
+      
 
       <Card>
         <SectionTitle>KPI templates (buckets &amp; weightage)</SectionTitle>

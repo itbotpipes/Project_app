@@ -478,3 +478,90 @@ export async function reassignReportingLine(employeeId: string, newReportsToId: 
   revalidatePath("/admin");
   return { ok: true };
 }
+
+export async function updateEmployeeRole(employeeId: string, newRoleId: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const isExecutiveOrManager =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.systemRole === "MANAGER" ||
+    ["CEO / Director", "COO"].includes(user.role?.title);
+
+  if (!isExecutiveOrManager) {
+    return { error: "Only managers and executives can edit positions/roles." };
+  }
+
+  const empRef = adminDb.collection("Employee").doc(employeeId);
+  const empDoc = await empRef.get();
+  if (!empDoc.exists) return { error: "Employee not found." };
+  const empData = empDoc.data() as any;
+
+  const roleSnap = await adminDb.collection("Role").doc(newRoleId).get();
+  if (!roleSnap.exists) return { error: "Target position/role not found." };
+  const roleData = roleSnap.data() as any;
+
+  await empRef.update({
+    roleId: newRoleId,
+    updatedAt: new Date(),
+  });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "employee.changeRole",
+    entity: "Employee",
+    entityId: employeeId,
+    detail: `Changed ${empData.name}'s position to ${roleData.title}`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+export async function updateRoleDepartment(roleId: string, newDepartmentId: string) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const isExecutiveOrManager =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.systemRole === "MANAGER" ||
+    ["CEO / Director", "COO"].includes(user.role?.title);
+
+  if (!isExecutiveOrManager) {
+    return { error: "Only managers and executives can edit departments." };
+  }
+
+  const roleRef = adminDb.collection("Role").doc(roleId);
+  const roleDoc = await roleRef.get();
+  if (!roleDoc.exists) return { error: "Position/Role not found." };
+
+  const deptSnap = await adminDb.collection("Department").doc(newDepartmentId).get();
+  if (!deptSnap.exists) return { error: "Department not found." };
+  const deptData = deptSnap.data() as any;
+
+  await roleRef.update({
+    departmentId: newDepartmentId,
+    updatedAt: new Date(),
+  });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "role.changeDepartment",
+    entity: "Role",
+    entityId: roleId,
+    detail: `Changed position department to ${deptData.name}`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/admin");
+  return { ok: true };
+}
+
+
