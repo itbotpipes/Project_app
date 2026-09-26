@@ -13,6 +13,7 @@ import {
   Network,
   ClipboardCheck,
   Trophy,
+  ClipboardList,
   Megaphone,
   Share2,
   Bell,
@@ -42,7 +43,7 @@ function hasPermission(
   isManager: boolean,
   canScore: boolean
 ) {
-  if (!permission) return true;
+  if (!permission || permission === "people") return true;
   if (userPermissions) {
     return userPermissions.includes(permission);
   }
@@ -51,7 +52,6 @@ function hasPermission(
       return systemRole === "ADMIN" || systemRole === "CEO";
     case "delegated":
     case "team":
-    case "people":
       return isManager;
     case "scores":
     case "announcements":
@@ -92,6 +92,7 @@ export default function Sidebar({
     {
       title: "SCORE",
       items: [
+        { href: "/daily-reports", label: "Daily Reports", icon: ClipboardList },
         { href: "/leaderboard", label: "Leaderboard", icon: Trophy, permission: "leaderboard" },
         { href: "/team", label: "My Team", icon: Users, permission: "team" },
         { href: "/performance", label: "Performance", icon: TrendingUp, permission: "performance" },

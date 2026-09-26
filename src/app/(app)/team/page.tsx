@@ -101,9 +101,14 @@ export default async function TeamPage() {
             {reportsData.length} direct report{reportsData.length === 1 ? "" : "s"} · tasks &amp; monthly scores
           </p>
         </div>
-        <Link href="/scores" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700">
-          Open Scoring Panel →
-        </Link>
+        <div className="flex items-center gap-2">
+          <Link href="/daily-reports" className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-50 transition">
+            📅 Person-Wise Daily Report →
+          </Link>
+          <Link href="/scores" className="rounded-lg bg-blue-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-blue-700 transition">
+            Open Scoring Panel →
+          </Link>
+        </div>
       </div>
 
       {reportsData.length === 0 && (

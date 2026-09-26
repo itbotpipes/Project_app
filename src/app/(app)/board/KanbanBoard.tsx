@@ -23,6 +23,7 @@ export type BoardTask = {
   carryCount: number;
   reworkCount: number;
   kpiName: string | null;
+  kpiPoints?: { earnedPoints: number; maxPoints: number } | null;
   projectName: string | null;
   delegatedBy: string | null;
   checklistTotal?: number;
@@ -263,6 +264,11 @@ export default function KanbanBoard({
                     {task.kpiName && (
                       <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700">
                         {task.kpiName}
+                      </span>
+                    )}
+                    {task.kpiPoints && (
+                      <span className="rounded-full bg-violet-600 text-white px-2 py-0.5 text-xs font-semibold inline-flex items-center gap-0.5">
+                        ⭐ {task.kpiPoints.earnedPoints} pts
                       </span>
                     )}
                     {task.sizeLabel && (

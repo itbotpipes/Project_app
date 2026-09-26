@@ -16,6 +16,7 @@ type TaskLike = {
   reviewRequired: boolean;
   carryCount: number;
   kpiTemplate: { kpiName: string } | null;
+  kpiPoints?: { earnedPoints: number; maxPoints: number } | null;
   project: { name: string } | null;
   assignee?: { name: string } | null;
   creator?: { name: string } | null;
@@ -58,6 +59,11 @@ export default function TaskCard({
         <Badge className={quadTone[quad]}>{quad}</Badge>
         {task.kpiTemplate && (
           <Badge className="bg-violet-100 text-violet-700">{task.kpiTemplate.kpiName}</Badge>
+        )}
+        {task.kpiPoints && (
+          <Badge className="bg-violet-600 text-white font-semibold">
+            ⭐ {task.kpiPoints.earnedPoints} pts
+          </Badge>
         )}
         {task.sizeLabel && (
           <Badge className="bg-slate-100 text-slate-600">{task.sizeLabel.toLowerCase()}</Badge>

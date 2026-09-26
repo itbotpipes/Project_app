@@ -12,6 +12,7 @@ import Celebration from "../_components/Celebration";
 import { loadTemplateOptions } from "@/lib/templates";
 import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 import ManageKpisDialog from "./ManageKpisDialog";
+import { calculateIndividualTaskPoints } from "@/lib/kpiPoints";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -182,26 +183,46 @@ export default async function BoardPage({
     .filter((e: any) => e.id !== user.id) || [];
   const people = [{ id: user.id, name: `${user.name} (me)`, roleId: user.roleId }, ...assignable];
 
-  const boardTasks = tasks.map(t => ({
-    id: t.id,
-    title: t.title,
-    status: t.status,
-    sizeLabel: t.sizeLabel,
-    urgent: t.urgent,
-    important: t.important,
-    estimatedMins: t.estimatedMins,
-    dueAt: t.dueAt,
-    holdReason: t.holdReason,
-    reviewRequired: t.reviewRequired,
-    carryCount: t.carryCount,
-    reworkCount: t.reworkCount,
-    kpiName: t.kpiTemplate?.kpiName ?? null,
-    projectName: t.project?.name ?? null,
-    delegatedBy:
-      t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name ?? null : null,
-    checklistTotal: t.checklistItems.length,
-    checklistDone: t.checklistItems.filter((c: any) => c.done).length,
-  }));
+  const boardTasks = tasks.map(t => {
+    const kpiData = t.kpiTemplateId ? (kpisMap.get(t.kpiTemplateId) as any) : null;
+    const pointsRes = kpiData ? calculateIndividualTaskPoints({
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      sizeLabel: t.sizeLabel,
+      estimatedMins: t.estimatedMins,
+      kpiTemplateId: t.kpiTemplateId,
+      urgent: t.urgent,
+      important: t.important,
+      carryCount: t.carryCount,
+      reworkCount: t.reworkCount,
+      dueAt: t.dueAt,
+      checklistTotal: t.checklistItems.length,
+      checklistDone: t.checklistItems.filter((c: any) => c.done).length,
+    }, kpiData.weightage ?? 20, 5.0, kpiData.kpiName) : null;
+
+    return {
+      id: t.id,
+      title: t.title,
+      status: t.status,
+      sizeLabel: t.sizeLabel,
+      urgent: t.urgent,
+      important: t.important,
+      estimatedMins: t.estimatedMins,
+      dueAt: t.dueAt,
+      holdReason: t.holdReason,
+      reviewRequired: t.reviewRequired,
+      carryCount: t.carryCount,
+      reworkCount: t.reworkCount,
+      kpiName: t.kpiTemplate?.kpiName ?? null,
+      kpiPoints: pointsRes ? { earnedPoints: pointsRes.earnedPoints, maxPoints: pointsRes.maxPoints } : null,
+      projectName: t.project?.name ?? null,
+      delegatedBy:
+        t.creatorId !== user.id && t.creatorId !== user.reportsToId ? t.creator?.name ?? null : null,
+      checklistTotal: t.checklistItems.length,
+      checklistDone: t.checklistItems.filter((c: any) => c.done).length,
+    };
+  });
   const closedTodayDocs = monthTasksSnap.docs
     ? monthTasksSnap.docs.filter(d => {
         const cAt = toDate(d.data().completedAt);

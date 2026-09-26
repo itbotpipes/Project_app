@@ -8,6 +8,7 @@ import { loadEmployeePerformance } from "@/lib/employeePerformance";
 import { Card, StatCard, SectionTitle, Badge } from "../../_components/ui";
 import { DualTrendLine, Donut, Legend, IncrementBar } from "../../_components/Charts";
 import BucketFill from "../../_components/BucketFill";
+import KpiAnalyticsSection from "../../_components/KpiAnalyticsSection";
 
 export default async function EmployeePerformancePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -61,6 +62,7 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
     history,
     bucketData,
     bucketFillData,
+    kpiAnalytics,
   } = await loadEmployeePerformance(id);
 
   return (
@@ -115,6 +117,8 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
           <Legend data={bucketData} />
         </Card>
       </div>
+
+      {kpiAnalytics && <KpiAnalyticsSection analytics={kpiAnalytics} />}
 
       <Card>
         <SectionTitle>📅 Monthly score history</SectionTitle>

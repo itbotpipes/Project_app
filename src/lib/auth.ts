@@ -153,6 +153,7 @@ export function canScoreCompanyWide(user: ScoringUser) {
 
 export function hasPermission(user: any, permission: string): boolean {
   if (!user) return false;
+  if (permission === "people") return true;
   
   if (user.role?.permissions) {
     return user.role.permissions.includes(permission);
@@ -166,8 +167,9 @@ export function hasPermission(user: any, permission: string): boolean {
       return isAdmin;
     case "delegated":
     case "team":
-    case "people":
       return isMgr;
+    case "people":
+      return true;
     case "scores":
     case "announcements":
       return canScoreCompanyWide(user);

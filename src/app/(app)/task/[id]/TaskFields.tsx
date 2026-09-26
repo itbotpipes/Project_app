@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Target, Sparkles, CheckCircle2, AlertCircle, RotateCcw } from "lucide-react";
 import { TASK_STATUS_LABEL } from "@/lib/constants";
 import { relativeTime } from "@/lib/date";
 import type { TaskDetailData } from "@/lib/taskDetail";
@@ -59,6 +60,12 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
 
         <div className="mt-3 flex flex-wrap gap-1.5">
           {task.kpiTemplate && <Badge className="bg-violet-100 text-violet-700">KPI: {task.kpiTemplate.kpiName}</Badge>}
+          {task.kpiPoints && (
+            <Badge className="bg-violet-600 text-white font-semibold inline-flex items-center gap-1">
+              <Sparkles size={11} />
+              {task.kpiPoints.earnedPoints} / {task.kpiPoints.maxPoints} pts
+            </Badge>
+          )}
           {task.sizeLabel && <Badge className="bg-slate-100 text-slate-600">{task.sizeLabel.toLowerCase()}</Badge>}
           {task.project && <Badge className="bg-slate-100 text-slate-600">📁 {task.project.name}</Badge>}
           {task.group && (
@@ -196,6 +203,75 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
           </div>
         </div>
       </Card>
+
+      {task.kpiPoints && (
+        <Card className="border-violet-100 bg-gradient-to-br from-violet-50/40 via-white to-white">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2">
+              <div className="grid h-7 w-7 place-items-center rounded-lg bg-violet-600 text-white shadow-sm">
+                <Target size={15} />
+              </div>
+              <div>
+                <h2 className="text-sm font-semibold text-slate-900">Task KPI Points Contribution</h2>
+                <p className="text-xs text-slate-500">
+                  KPI Bucket: <span className="font-medium text-violet-700">{task.kpiPoints.kpiName}</span> ({task.kpiPoints.weightage} pts weightage)
+                </p>
+              </div>
+            </div>
+            <div className="flex items-baseline gap-1 rounded-xl bg-violet-100/80 px-3 py-1 text-violet-900">
+              <Sparkles size={13} className="text-violet-600" />
+              <span className="text-lg font-bold">{task.kpiPoints.earnedPoints}</span>
+              <span className="text-xs text-slate-500">/ {task.kpiPoints.maxPoints} pts</span>
+            </div>
+          </div>
+
+          <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4 text-xs">
+            <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 font-medium block">Base Share</span>
+              <span className="font-semibold text-slate-800 mt-0.5 block">{task.kpiPoints.breakdown.baseAllocation} pts</span>
+              <span className="text-[10px] text-slate-400">Effort &amp; size weighting</span>
+            </div>
+
+            <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 font-medium block">Completion Factor</span>
+              <span className="font-semibold text-slate-800 mt-0.5 block">
+                {Math.round(task.kpiPoints.completionRate * 100)}%
+              </span>
+              <span className="text-[10px] text-slate-400">{task.status === "CLOSED" ? "Full completion" : "In progress"}</span>
+            </div>
+
+            <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 font-medium block">Timeliness</span>
+              <span className="font-semibold mt-0.5 block">
+                {task.kpiPoints.isOnTime === true ? (
+                  <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 size={11} /> On time</span>
+                ) : task.kpiPoints.isOnTime === false ? (
+                  <span className="text-amber-600 flex items-center gap-1"><AlertCircle size={11} /> Late</span>
+                ) : (
+                  <span className="text-slate-500">On schedule</span>
+                )}
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {task.carryCount > 0 ? `-${task.kpiPoints.breakdown.carryPenalty} pts (carried ${task.carryCount}×)` : "No carry delay"}
+              </span>
+            </div>
+
+            <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
+              <span className="text-[10px] uppercase tracking-wide text-slate-400 font-medium block">Quality Index</span>
+              <span className="font-semibold mt-0.5 block">
+                {task.reworkCount > 0 ? (
+                  <span className="text-red-600 flex items-center gap-1"><RotateCcw size={11} /> {task.reworkCount}× rework</span>
+                ) : (
+                  <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 size={11} /> Clean (100%)</span>
+                )}
+              </span>
+              <span className="text-[10px] text-slate-400">
+                {task.reworkCount > 0 ? `-${task.kpiPoints.breakdown.reworkPenalty} pts penalty` : "0 rejections"}
+              </span>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <Card>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Checklist</h2>

@@ -2,6 +2,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { isManagerLike } from "@/lib/auth";
 import { priorityQuadrant } from "@/lib/constants";
 import { batchFetchByIds } from "./cache";
+import { calculateIndividualTaskPoints } from "./kpiPoints";
 
 const PRIORITY_META: Record<string, { label: string; flag: string; tone: string }> = {
   "Do First": { label: "High", flag: "🚩", tone: "text-red-600" },
@@ -167,13 +168,23 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   const isWatching = watchers.some((w: any) => w.employee.id === viewer.id);
   const canDelete = task.creatorId === viewer.id || task.assigneeId === viewer.id || isManagerLike(viewer.systemRole);
 
-  const creatorData = creatorDoc?.exists ? creatorDoc.data() : null;
-  const reviewerData = reviewerDoc?.exists ? reviewerDoc.data() : null;
-  const kpiData = kpiTemplateDoc?.exists ? kpiTemplateDoc.data() : null;
-  const projectData = projectDoc?.exists ? projectDoc.data() : null;
-  const groupData = groupDoc?.exists ? groupDoc.data() : null;
-
-  const dueAt = toDate(task.dueAt);
+  const kpiPoints = kpiData ? calculateIndividualTaskPoints({
+    id: task.id,
+    title: task.title,
+    status: task.status,
+    sizeLabel: task.sizeLabel,
+    estimatedMins: task.estimatedMins,
+    kpiTemplateId: task.kpiTemplateId,
+    urgent: task.urgent,
+    important: task.important,
+    carryCount: task.carryCount || 0,
+    reworkCount: task.reworkCount || 0,
+    createdAt: toDate(task.createdAt),
+    completedAt: toDate(task.completedAt),
+    dueAt: toDate(task.dueAt),
+    checklistTotal: checklistItems.length,
+    checklistDone: checklistItems.filter((c: any) => c.done).length,
+  }, kpiData.weightage ?? 20, 5.0, kpiData.kpiName) : null;
 
   return {
     id: task.id,
@@ -197,7 +208,8 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     assignee: assignee ? { id: assignee.id, name: assignee.name, avatarUrl: assignee.avatarUrl } : null,
     creator: creatorData ? { id: task.creatorId, name: creatorData.name, avatarUrl: creatorData.avatarUrl } : null,
     reviewer: reviewerData ? { id: task.reviewerId, name: reviewerData.name } : null,
-    kpiTemplate: kpiData ? { id: task.kpiTemplateId, kpiName: kpiData.kpiName } : null,
+    kpiTemplate: kpiData ? { id: task.kpiTemplateId, kpiName: kpiData.kpiName, weightage: kpiData.weightage ?? 0 } : null,
+    kpiPoints,
     project: projectData ? { id: task.projectId, name: projectData.name } : null,
     group: groupData ? { id: task.groupId, name: groupData.name } : null,
     watchers,

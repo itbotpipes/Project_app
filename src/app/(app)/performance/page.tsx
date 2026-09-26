@@ -5,6 +5,7 @@ import { loadEmployeePerformance } from "@/lib/employeePerformance";
 import { Card, StatCard, SectionTitle, Badge } from "../_components/ui";
 import { DualTrendLine, Donut, Legend, ScoreBars, IncrementBar } from "../_components/Charts";
 import BucketFill from "../_components/BucketFill";
+import KpiAnalyticsSection from "../_components/KpiAnalyticsSection";
 import { batchFetchByIds, cachedFetch } from "@/lib/cache";
 
 export default async function PerformancePage() {
@@ -40,6 +41,7 @@ export default async function PerformancePage() {
     history,
     bucketData,
     bucketFillData,
+    kpiAnalytics,
   } = performanceData;
 
   // Team scores (managers) — latest period
@@ -139,6 +141,8 @@ export default async function PerformancePage() {
           <Legend data={bucketData} />
         </Card>
       </div>
+
+      {kpiAnalytics && <KpiAnalyticsSection analytics={kpiAnalytics} />}
 
       <Card>
         <SectionTitle>📅 Monthly score history</SectionTitle>

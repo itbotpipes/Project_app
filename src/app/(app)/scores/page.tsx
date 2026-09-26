@@ -164,12 +164,10 @@ export default async function ScoresPage({
     <div className="mx-auto max-w-5xl space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">
-          {isEmployee ? "Company Directory" : "Directory & Performance Scoring"}
+          Performance Scoring Panel
         </h1>
         <p className="text-sm text-slate-500">
-          {isEmployee
-            ? `${employees.length} people across the company and their latest performance scores.`
-            : "Review active members' profiles and update/override their automatically calculated KPI scores."}
+          Review team members and finalize monthly KPI &amp; behavioural review scores.
         </p>
       </div>
 

@@ -3,6 +3,7 @@ import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
 import { behaviourPct, behaviourPctFromMany } from "@/lib/behaviour";
 import { fetchKpiTemplatesByRole, batchFetchByIds } from "@/lib/cache";
+import { calculateKpiPerformanceAnalytics } from "@/lib/kpiPoints";
 
 export function readiness(avg: number) {
   if (avg >= 75) return { label: "Ready for promotion", tone: "bg-emerald-100 text-emerald-700" };
@@ -87,13 +88,37 @@ export async function loadEmployeePerformance(employeeId: string) {
     .where("assigneeId", "==", employeeId)
     .where("createdAt", ">=", startOfMonth)
     .get();
+
+  const monthTasks = (monthTasksSnap.docs || [])
+    .filter((d) => !d.data().deletedAt)
+    .map((d) => {
+      const data = d.data();
+      return {
+        id: d.id,
+        title: data.title,
+        status: data.status,
+        sizeLabel: data.sizeLabel ?? null,
+        estimatedMins: data.estimatedMins ?? null,
+        kpiTemplateId: data.kpiTemplateId ?? null,
+        urgent: !!data.urgent,
+        important: !!data.important,
+        carryCount: data.carryCount || 0,
+        reworkCount: data.reworkCount || 0,
+        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || 0),
+        completedAt: data.completedAt?.toDate ? data.completedAt.toDate() : (data.completedAt ? new Date(data.completedAt) : null),
+        dueAt: data.dueAt?.toDate ? data.dueAt.toDate() : (data.dueAt ? new Date(data.dueAt) : null),
+      };
+    });
+
   const countByKpi = new Map<string, number>();
-  for (const doc of monthTasksSnap.docs) {
-    const kpiId = doc.data().kpiTemplateId;
-    if (!kpiId) continue;
-    countByKpi.set(kpiId, (countByKpi.get(kpiId) ?? 0) + 1);
+  for (const t of monthTasks) {
+    if (!t.kpiTemplateId) continue;
+    countByKpi.set(t.kpiTemplateId, (countByKpi.get(t.kpiTemplateId) ?? 0) + 1);
   }
   const bucketFillData = kpis.map((k) => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
+
+  // Compute rich KPI Performance Analytics (bucket-level points & individual task points)
+  const kpiAnalytics = calculateKpiPerformanceAnalytics(kpis, monthTasks);
 
   return {
     employee: employeeWithRole,
@@ -110,5 +135,6 @@ export async function loadEmployeePerformance(employeeId: string) {
     history,
     bucketData,
     bucketFillData,
+    kpiAnalytics,
   };
 }
