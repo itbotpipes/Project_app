@@ -84,6 +84,12 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   ]);
 
   const assignee = assigneeDoc?.exists ? { id: assigneeDoc.id, ...assigneeDoc.data() } as any : null;
+  const creatorData = creatorDoc?.exists ? { id: creatorDoc.id, ...creatorDoc.data() } as any : null;
+  const reviewerData = reviewerDoc?.exists ? { id: reviewerDoc.id, ...reviewerDoc.data() } as any : null;
+  const kpiData = kpiTemplateDoc?.exists ? { id: kpiTemplateDoc.id, ...kpiTemplateDoc.data() } as any : null;
+  const projectData = projectDoc?.exists ? { id: projectDoc.id, ...projectDoc.data() } as any : null;
+  const groupData = groupDoc?.exists ? { id: groupDoc.id, ...groupDoc.data() } as any : null;
+  const dueAt = toDate(task.dueAt);
 
   // Fetch kpiOptions for the assignee's role
   const kpiOptions = assignee?.roleId
@@ -194,7 +200,8 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     category: task.category,
     sizeLabel: task.sizeLabel,
     reviewRequired: task.reviewRequired,
-    reworkCount: task.reworkCount,
+    reworkCount: task.reworkCount ?? 0,
+    carryCount: task.carryCount ?? 0,
     rejectionReason: task.rejectionReason,
     holdReason: task.holdReason,
     estimatedMins: task.estimatedMins,

@@ -252,7 +252,7 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
                 )}
               </span>
               <span className="text-[10px] text-slate-400">
-                {task.carryCount > 0 ? `-${task.kpiPoints.breakdown.carryPenalty} pts (carried ${task.carryCount}×)` : "No carry delay"}
+                {(task.carryCount ?? 0) > 0 ? `-${task.kpiPoints?.breakdown?.carryPenalty ?? 0} pts (carried ${task.carryCount}×)` : "No carry delay"}
               </span>
             </div>
 
