@@ -95,6 +95,7 @@ export async function createEmployee(formData: FormData) {
 
   revalidatePath("/admin");
   revalidatePath("/people");
+  revalidatePath("/org");
   return { ok: true };
 }
 
@@ -110,6 +111,7 @@ export async function setEmployeeAvatar(formData: FormData) {
   revalidatePath("/admin");
   revalidatePath("/people");
   revalidatePath("/leaderboard");
+  revalidatePath("/org");
   revalidatePath("/");
 }
 
@@ -132,6 +134,8 @@ export async function setEmployeeActive(formData: FormData) {
   });
   
   revalidatePath("/admin");
+  revalidatePath("/people");
+  revalidatePath("/org");
 }
 
 export async function addKpiTemplate(formData: FormData) {
@@ -563,5 +567,123 @@ export async function updateRoleDepartment(roleId: string, newDepartmentId: stri
   revalidatePath("/admin");
   return { ok: true };
 }
+
+export async function updateEmployeeHierarchy(payload: {
+  employeeId: string;
+  roleId?: string;
+  customRoleTitle?: string;
+  level?: number;
+  departmentId?: string;
+  reportsToId?: string | null;
+  avatarUrl?: string | null;
+  systemRole?: string;
+}) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const isExecutiveOrManager =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.systemRole === "MANAGER" ||
+    ["CEO / Director", "COO", "GM"].includes(user.role?.title);
+
+  if (!isExecutiveOrManager) {
+    return { error: "Only managers and executives can update employee hierarchy." };
+  }
+
+  const { employeeId, roleId, customRoleTitle, level, departmentId, reportsToId, avatarUrl, systemRole } = payload;
+  if (!employeeId) return { error: "Employee ID is required." };
+
+  const empRef = adminDb.collection("Employee").doc(employeeId);
+  const empDoc = await empRef.get();
+  if (!empDoc.exists) return { error: "Employee not found." };
+  const empData = empDoc.data() as any;
+
+  // Cycle check for reporting line
+  if (reportsToId !== undefined && reportsToId !== null) {
+    if (reportsToId === employeeId) {
+      return { error: "An employee cannot report to themselves." };
+    }
+
+    // Check if new manager is a descendant
+    const allEmpsSnap = await adminDb.collection("Employee").where("active", "==", true).get();
+    const allEmps = allEmpsSnap.docs.map((d) => ({ id: d.id, reportsToId: d.data().reportsToId }));
+
+    let curr: string | null = reportsToId;
+    const visited = new Set<string>();
+    while (curr) {
+      if (curr === employeeId) {
+        return { error: "Circular reporting loop detected. A manager cannot report to their own subordinate." };
+      }
+      if (visited.has(curr)) break;
+      visited.add(curr);
+      const parent = allEmps.find((e) => e.id === curr);
+      curr = parent?.reportsToId || null;
+    }
+  }
+
+  let finalRoleId = roleId;
+
+  // If user provided a new custom role title
+  if (customRoleTitle && customRoleTitle.trim()) {
+    const trimmedTitle = customRoleTitle.trim();
+    const roleExistsSnap = await adminDb.collection("Role").where("title", "==", trimmedTitle).limit(1).get();
+    if (!roleExistsSnap.empty) {
+      finalRoleId = roleExistsSnap.docs[0].id;
+    } else {
+      const newRoleRef = await adminDb.collection("Role").add({
+        title: trimmedTitle,
+        departmentId: departmentId || null,
+        level: level !== undefined ? level : 50,
+        createdAt: new Date(),
+      });
+      finalRoleId = newRoleRef.id;
+    }
+  }
+
+  const updates: any = {
+    updatedAt: new Date(),
+  };
+
+  if (finalRoleId) updates.roleId = finalRoleId;
+  if (reportsToId !== undefined) {
+    updates.reportsToId = reportsToId;
+    updates.reportsToIds = reportsToId ? [reportsToId] : [];
+  }
+  if (avatarUrl !== undefined) updates.avatarUrl = avatarUrl;
+  if (systemRole) updates.systemRole = systemRole;
+
+  await empRef.update(updates);
+
+  // Update role's level and department if provided
+  if (finalRoleId) {
+    const roleRef = adminDb.collection("Role").doc(finalRoleId);
+    const roleDoc = await roleRef.get();
+    if (roleDoc.exists) {
+      const roleUpdates: any = { updatedAt: new Date() };
+      if (level !== undefined) roleUpdates.level = level;
+      if (departmentId && roleDoc.data()?.departmentId !== departmentId) {
+        roleUpdates.departmentId = departmentId;
+      }
+      await roleRef.update(roleUpdates);
+    }
+  }
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "employee.updateHierarchy",
+    entity: "Employee",
+    entityId: employeeId,
+    detail: `Updated position & hierarchy for ${empData.name}`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/admin");
+  revalidatePath("/leaderboard");
+  return { ok: true };
+}
+
 
 
