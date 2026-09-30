@@ -5,6 +5,8 @@ import { Plus, ListChecks, X, FileStack, Search, Check } from "lucide-react";
 import { createTask } from "@/lib/actions/tasks";
 import BucketFill from "../_components/BucketFill";
 import DateTimePicker from "../_components/DateTimePicker";
+import VoiceTaskDictator from "../_components/VoiceTaskDictator";
+import { VoiceParseResult } from "@/lib/voiceTaskParser";
 
 type KpiOpt = { id: string; kpiName: string; kraName: string; roleId?: string };
 type Person = { id: string; name: string; roleId?: string };
@@ -46,6 +48,7 @@ export default function NewTaskDialog({
   const [assigneeIds, setAssigneeIds] = useState<string[]>([selfId]);
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [priority, setPriority] = useState<"high" | "important-only" | "urgent-only" | "low">("low");
+  const [dueAt, setDueAt] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const urgent = priority === "high" || priority === "urgent-only";
   const important = priority === "high" || priority === "important-only";
@@ -57,6 +60,20 @@ export default function NewTaskDialog({
   const [showLoop, setShowLoop] = useState(false);
   const [watcherIds, setWatcherIds] = useState<string[]>([]);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
+
+  function handleVoiceParsed(result: VoiceParseResult) {
+    if (result.title) setTitle(result.title);
+    if (result.description !== undefined) {
+      setDescription(result.description);
+    }
+    if (result.assigneeIds && result.assigneeIds.length > 0) {
+      setAssigneeIds(result.assigneeIds);
+    }
+    if (result.priority) setPriority(result.priority);
+    if (result.kpiId) setSelectedKpi(result.kpiId);
+    if (result.sizeLabel) setSizeLabel(result.sizeLabel);
+    if (result.dueAt) setDueAt(result.dueAt);
+  }
 
   const firstAssigneeRoleId = people.find((p) => assigneeIds.includes(p.id))?.roleId;
   const filteredKpiOptions = kpiOptions.filter((k) => !k.roleId || k.roleId === firstAssigneeRoleId);
@@ -96,6 +113,7 @@ export default function NewTaskDialog({
     setAssigneeIds([selfId]);
     setAssigneeSearch("");
     setPriority("low");
+    setDueAt("");
     setShowChecklist(false);
     setChecklist([]);
     setChecklistDraft("");
@@ -174,6 +192,13 @@ export default function NewTaskDialog({
               }}
               className="space-y-3"
             >
+              {/* Voice Task Command Dictation */}
+              <VoiceTaskDictator
+                people={people}
+                kpiOptions={kpiOptions}
+                onVoiceParsed={handleVoiceParsed}
+              />
+
               {templates && templates.length > 0 && (
                 <label className="block rounded-lg border border-blue-200 bg-blue-50/60 px-2.5 py-2 text-xs font-medium text-blue-700">
                   <span className="flex items-center gap-1.5"><FileStack size={13} /> Start from a template</span>
@@ -446,7 +471,7 @@ export default function NewTaskDialog({
                 <label className="col-span-2 text-xs font-medium text-slate-600">
                   Due
                   <div className="mt-1">
-                    <DateTimePicker name="dueAt" minToday />
+                    <DateTimePicker name="dueAt" value={dueAt} minToday />
                   </div>
                 </label>
               </div>

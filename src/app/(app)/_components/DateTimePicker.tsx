@@ -32,21 +32,31 @@ function fmt(d: Date): string {
 export default function DateTimePicker({
   name,
   defaultValue,
+  value: valueProp,
   required,
   placeholder = "Pick date & time",
   minToday,
 }: {
   name: string;
   defaultValue?: string;
+  value?: string;
   required?: boolean;
   placeholder?: string;
   minToday?: boolean;
 }) {
-  const initial = parseValue(defaultValue ?? "");
+  const initial = parseValue(valueProp ?? defaultValue ?? "");
   const [value, setValue] = useState<Date | null>(initial);
   const [open, setOpen] = useState(false);
   const [viewMonth, setViewMonth] = useState(() => initial ?? new Date());
   const wrapRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (valueProp !== undefined) {
+      const parsed = parseValue(valueProp);
+      setValue(parsed);
+      if (parsed) setViewMonth(parsed);
+    }
+  }, [valueProp]);
 
   useEffect(() => {
     function onClick(e: MouseEvent) {
