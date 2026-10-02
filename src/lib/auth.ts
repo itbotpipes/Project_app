@@ -58,73 +58,78 @@ export const getCurrentUser = cache(async () => {
   const id = await getSessionEmployeeId();
   if (!id) return null;
   
-  const userDoc = await adminDb.collection("Employee").doc(id).get();
-  if (!userDoc.exists) return null;
-  
-  const userData = userDoc.data();
-  if (!userData || !userData.active) return null;
-  
-  // Convert Firestore Timestamps to Dates for serialization
-  const serializedUser: any = {};
-  for (const [key, value] of Object.entries(userData)) {
-    if (value && typeof value === 'object' && 'toDate' in value) {
-      serializedUser[key] = (value as any).toDate();
-    } else {
-      serializedUser[key] = value;
-    }
-  }
-  
-  // Note: Resolving relations manually since Firestore is NoSQL
-  let roleData: any = null;
-  if (serializedUser.roleId) {
-    const rolesSnap = await fetchAllRoles(adminDb);
-    const roleDoc = rolesSnap.docs?.find((d: any) => d.id === serializedUser.roleId);
+  try {
+    const userDoc = await adminDb.collection("Employee").doc(id).get();
+    if (!userDoc.exists) return null;
     
-    if (roleDoc) {
-      const rawRoleData = roleDoc.data();
-      // Convert role data timestamps
-      roleData = {};
-      for (const [key, value] of Object.entries(rawRoleData || {})) {
-        if (value && typeof value === 'object' && 'toDate' in value) {
-          (roleData as any)[key] = (value as any).toDate();
-        } else {
-          (roleData as any)[key] = value;
-        }
+    const userData = userDoc.data();
+    if (!userData || !userData.active) return null;
+    
+    // Convert Firestore Timestamps to Dates for serialization
+    const serializedUser: any = {};
+    for (const [key, value] of Object.entries(userData)) {
+      if (value && typeof value === 'object' && 'toDate' in value) {
+        serializedUser[key] = (value as any).toDate();
+      } else {
+        serializedUser[key] = value;
       }
-      if (roleData && roleData.departmentId) {
-        const deptsSnap = await fetchAllDepartments(adminDb);
-        const deptDoc = deptsSnap.docs?.find((d: any) => d.id === roleData.departmentId);
-        if (deptDoc) {
-          const rawDeptData = deptDoc.data();
-          // Convert department data timestamps
-          const deptData: any = {};
-          for (const [key, value] of Object.entries(rawDeptData || {})) {
-            if (value && typeof value === 'object' && 'toDate' in value) {
-              deptData[key] = (value as any).toDate();
-            } else {
-              deptData[key] = value;
-            }
+    }
+    
+    // Note: Resolving relations manually since Firestore is NoSQL
+    let roleData: any = null;
+    if (serializedUser.roleId) {
+      const rolesSnap = await fetchAllRoles(adminDb);
+      const roleDoc = rolesSnap.docs?.find((d: any) => d.id === serializedUser.roleId);
+      
+      if (roleDoc) {
+        const rawRoleData = roleDoc.data();
+        // Convert role data timestamps
+        roleData = {};
+        for (const [key, value] of Object.entries(rawRoleData || {})) {
+          if (value && typeof value === 'object' && 'toDate' in value) {
+            (roleData as any)[key] = (value as any).toDate();
+          } else {
+            (roleData as any)[key] = value;
           }
-          roleData.department = deptData;
+        }
+        if (roleData && roleData.departmentId) {
+          const deptsSnap = await fetchAllDepartments(adminDb);
+          const deptDoc = deptsSnap.docs?.find((d: any) => d.id === roleData.departmentId);
+          if (deptDoc) {
+            const rawDeptData = deptDoc.data();
+            // Convert department data timestamps
+            const deptData: any = {};
+            for (const [key, value] of Object.entries(rawDeptData || {})) {
+              if (value && typeof value === 'object' && 'toDate' in value) {
+                deptData[key] = (value as any).toDate();
+              } else {
+                deptData[key] = value;
+              }
+            }
+            roleData.department = deptData;
+          }
         }
       }
     }
-  }
-  
-  const systemRoleDocSnap = await adminDb.collection("SystemRole").where("name", "==", serializedUser.systemRole).limit(1).get();
-  let systemRoleObj = { isManager: false, isAdmin: false };
-  if (!systemRoleDocSnap.empty) {
-    const data = systemRoleDocSnap.docs[0].data();
-    systemRoleObj = { isManager: !!data.isManager, isAdmin: !!data.isAdmin };
-  } else {
-    if (["ADMIN", "CEO"].includes(serializedUser.systemRole)) {
-      systemRoleObj = { isManager: true, isAdmin: true };
-    } else if (serializedUser.systemRole === "MANAGER") {
-      systemRoleObj = { isManager: true, isAdmin: false };
+    
+    const systemRoleDocSnap = await adminDb.collection("SystemRole").where("name", "==", serializedUser.systemRole).limit(1).get();
+    let systemRoleObj = { isManager: false, isAdmin: false };
+    if (!systemRoleDocSnap.empty) {
+      const data = systemRoleDocSnap.docs[0].data();
+      systemRoleObj = { isManager: !!data.isManager, isAdmin: !!data.isAdmin };
+    } else {
+      if (["ADMIN", "CEO"].includes(serializedUser.systemRole)) {
+        systemRoleObj = { isManager: true, isAdmin: true };
+      } else if (serializedUser.systemRole === "MANAGER") {
+        systemRoleObj = { isManager: true, isAdmin: false };
+      }
     }
-  }
 
-  return { id, ...serializedUser, role: roleData, systemRoleObj } as any;
+    return { id, ...serializedUser, role: roleData, systemRoleObj } as any;
+  } catch (error: any) {
+    console.error("[getCurrentUser] Firestore connection/auth error:", error?.message || error);
+    return null;
+  }
 });
 
 export function isManagerLike(userOrRole: any, systemRoleObj?: { isManager: boolean; isAdmin: boolean }) {

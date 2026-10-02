@@ -120,6 +120,7 @@ export default async function ScoresPage({
     scoresSnap.docs?.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
     tasksSnap.docs?.forEach((d: any) => {
       const t = d.data();
+      if (t.deletedAt) return;
       const raw = t.createdAt;
       const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
       tasks.push({
@@ -129,6 +130,7 @@ export default async function ScoresPage({
         createdAt,
         completedAt: t.completedAt ? (t.completedAt.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
         carryCount: t.carryCount ?? 0,
+        reworkCount: t.reworkCount ?? 0,
       });
     });
     reviewsSnap.docs?.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));

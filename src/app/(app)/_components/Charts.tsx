@@ -43,27 +43,89 @@ export function TrendLine({
   );
 }
 
+export type TrendPoint = {
+  label?: string;
+  month?: string;
+  auto?: number | null;
+  autoScore?: number | null;
+  manager?: number | null;
+  managerScore?: number | null;
+  isLive?: boolean;
+};
+
 /** Auto (system) score vs. Manager (human) score, both out of 100, over time. */
 export function DualTrendLine({
   data,
 }: {
-  data: { label: string; auto: number | null; manager: number | null }[];
+  data: TrendPoint[];
 }) {
+  const chartData = data.map((d) => ({
+    ...d,
+    label: d.label || d.month || "",
+    month: d.month || d.label || "",
+    auto: d.auto !== undefined ? d.auto : (d.autoScore !== undefined ? d.autoScore : null),
+    manager: d.manager !== undefined ? d.manager : (d.managerScore !== undefined ? d.managerScore : null),
+  }));
+
+  const renderAutoDot = (props: any) => {
+    const { cx, cy, payload } = props;
+    if (cx == null || cy == null || payload?.auto == null) return null;
+    if (payload?.isLive) {
+      return (
+        <g key={`dot-live-${cx}-${cy}`}>
+          <circle cx={cx} cy={cy} r={6} fill="#ffffff" stroke="#2563eb" strokeWidth={2.5} />
+          <circle cx={cx} cy={cy} r={2.5} fill="#2563eb" />
+        </g>
+      );
+    }
+    return <circle key={`dot-auto-${cx}-${cy}`} cx={cx} cy={cy} r={4} fill="#2563eb" />;
+  };
+
+  const renderManagerDot = (props: any) => {
+    const { cx, cy, payload } = props;
+    if (cx == null || cy == null || payload?.manager == null) return null;
+    return <circle key={`dot-mgr-${cx}-${cy}`} cx={cx} cy={cy} r={4} fill="#8b5cf6" />;
+  };
+
   return (
     <ResponsiveContainer width="100%" height={240}>
-      <LineChart data={data} margin={{ top: 5, right: 10, left: -20, bottom: 0 }}>
+      <LineChart data={chartData} margin={{ top: 10, right: 15, left: -20, bottom: 0 }}>
         <CartesianGrid strokeDasharray="3 3" stroke="#eef2f7" />
-        <XAxis dataKey="label" tick={{ fontSize: 12, fill: "#64748b" }} />
+        <XAxis
+          dataKey="label"
+          tick={{ fontSize: 11, fill: "#64748b" }}
+          tickMargin={6}
+        />
         <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: "#64748b" }} />
-        <Tooltip />
-        <RLegend wrapperStyle={{ fontSize: 12 }} />
+        <Tooltip
+          formatter={(value: any, name: string) => {
+            if (value === null || value === undefined) return ["—", name];
+            return [`${Math.round(Number(value))}/100`, name];
+          }}
+          labelFormatter={(label: string, payload: any) => {
+            const item = payload?.[0]?.payload;
+            if (item?.isLive) {
+              return `${item.month || label} (Live / In Progress — not finalized)`;
+            }
+            return item?.month || label;
+          }}
+          contentStyle={{
+            backgroundColor: "#ffffff",
+            borderColor: "#e2e8f0",
+            borderRadius: "0.5rem",
+            fontSize: "12px",
+            boxShadow: "0 4px 6px -1px rgba(0, 0, 0, 0.1)",
+          }}
+        />
+        <RLegend wrapperStyle={{ fontSize: 12, paddingTop: 6 }} />
         <Line
           type="monotone"
           dataKey="auto"
           name="Auto (system)"
           stroke="#2563eb"
           strokeWidth={2.5}
-          dot={{ r: 4 }}
+          dot={renderAutoDot}
+          activeDot={{ r: 6 }}
           connectNulls
         />
         <Line
@@ -73,7 +135,8 @@ export function DualTrendLine({
           stroke="#8b5cf6"
           strokeWidth={2.5}
           strokeDasharray="5 3"
-          dot={{ r: 4 }}
+          dot={renderManagerDot}
+          activeDot={{ r: 6 }}
           connectNulls
         />
       </LineChart>

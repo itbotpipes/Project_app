@@ -9,7 +9,10 @@ import Avatar from "../_components/Avatar";
 import NewEmployeeForm from "./NewEmployeeForm";
 import KpiManager from "./KpiManager";
 import RoleManager from "./RoleManager";
+import DepartmentManager from "./DepartmentManager";
 import EditEmployeeDialog from "./EditEmployeeDialog";
+import PeopleTable from "./PeopleTable";
+import AdminQuickSearch, { SearchableItem } from "./AdminQuickSearch";
 import CreateTemplateDialog from "../templates/CreateTemplateDialog";
 import TaskLink from "../_components/TaskLink";
 
@@ -139,68 +142,105 @@ export default async function AdminPage() {
     })
     .map((e: any) => ({ id: e.id, label: `${e.name} (${e.role.title})` }));
 
+  const departmentItems = departmentsSnap.docs.map((d: any) => ({
+    id: d.id,
+    name: d.data().name,
+    createdAt: d.data().createdAt?.toDate?.()?.toISOString() ?? null,
+  })).sort((a: any, b: any) => a.name.localeCompare(b.name));
+
+  const departmentEmployees = employees.map((e: any) => ({
+    id: e.id,
+    name: e.name,
+    email: e.email,
+    avatarUrl: e.avatarUrl || null,
+    active: !!e.active,
+    roleId: e.roleId,
+    departmentId: e.departmentId || null,
+    role: {
+      id: e.role?.id,
+      title: e.role?.title || "Unknown",
+      departmentId: e.role?.departmentId || null,
+    },
+    systemRole: e.systemRole || "EMPLOYEE",
+    reportsToId: e.reportsToId || null,
+    reportsToIds: e.reportsToIds || (e.reportsToId ? [e.reportsToId] : []),
+    reportsToName: e.reportsToId ? (employees.find((m: any) => m.id === e.reportsToId)?.name || null) : null,
+    birthday: e.birthday ? (e.birthday.toDate ? e.birthday.toDate().toISOString() : new Date(e.birthday).toISOString()) : null,
+  }));
+
+  const searchableItems: SearchableItem[] = [
+    ...employees.map((e: any) => ({
+      id: e.id,
+      type: "person" as const,
+      title: e.name,
+      subtitle: `${e.role?.title || "Unknown Position"} • ${e.email}`,
+      tag: e.active ? "Active" : "Inactive",
+      avatarUrl: e.avatarUrl || null,
+      elementId: `person-row-${e.id}`,
+    })),
+    ...departmentItems.map((d) => ({
+      id: d.id,
+      type: "department" as const,
+      title: d.name,
+      subtitle: "Department",
+    })),
+    ...roles.map((r: any) => ({
+      id: r.id,
+      type: "role" as const,
+      title: r.title,
+      subtitle: `Level ${r.level} Role`,
+    })),
+    ...kpis.map((k: any) => ({
+      id: k.id,
+      type: "kpi" as const,
+      title: k.kpiName || "KPI Template",
+      subtitle: `${k.kraName || "KRA"} (${k.weightage || 0} pts)`,
+    })),
+    ...templates.map((t: any) => ({
+      id: t.id,
+      type: "template" as const,
+      title: t.name || "Task Template",
+      subtitle: roleMap.get(t.roleId)?.title ? `Template for ${roleMap.get(t.roleId).title}` : "Task Template",
+    })),
+  ];
+
   return (
     <div className="mx-auto max-w-5xl space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold">Admin</h1>
-        <p className="text-sm text-slate-500">Manage people, roles and KPI templates — no developer needed.</p>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold text-slate-900">Admin</h1>
+          <p className="text-sm text-slate-500">Manage people, departments, roles and KPI templates — no developer needed.</p>
+        </div>
+        <AdminQuickSearch items={searchableItems} />
       </div>
 
       <Card>
-        <div className="flex items-center justify-between">
+        <div className="flex items-center justify-between mb-3">
           <SectionTitle>People ({employees.filter((e: any) => e.active).length} active)</SectionTitle>
           <NewEmployeeForm roles={roleOpts} managers={managerOpts} systemRoles={systemRoleOpts} />
         </div>
-        <div className="mt-3 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="text-left text-xs uppercase tracking-wide text-slate-400">
-                <th className="pb-2 font-medium"></th>
-                <th className="pb-2 font-medium">Name</th>
-                <th className="pb-2 font-medium">Role</th>
-                <th className="pb-2 font-medium">Access</th>
-                <th className="pb-2 font-medium text-right">Status</th>
-                <th className="pb-2 font-medium text-right">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {employees.map((e: any) => (
-                <tr key={e.id} className={e.active ? "" : "opacity-50"}>
-                  <td className="py-2 pr-2"><Avatar name={e.name} url={e.avatarUrl} size={28} /></td>
-                  <td className="py-2 font-medium">{e.name}</td>
-                  <td className="py-2 text-slate-600">{e.role.title}</td>
-                  <td className="py-2"><Badge className="bg-slate-100 text-slate-600">{e.systemRole}</Badge></td>
-                  <td className="py-2 text-right">
-                    <form action={setEmployeeActive} className="inline">
-                      <input type="hidden" name="id" value={e.id} />
-                      <input type="hidden" name="active" value={(!e.active).toString()} />
-                      <button className="rounded-md border border-slate-300 px-2 py-1 text-xs hover:bg-slate-100">
-                        {e.active ? "Deactivate" : "Activate"}
-                      </button>
-                    </form>
-                  </td>
-                  <td className="py-2 text-right">
-                    <EditEmployeeDialog
-                      employee={{
-                        id: e.id,
-                        name: e.name,
-                        email: e.email,
-                        roleId: e.roleId,
-                        reportsToId: e.reportsToId || null,
-                        reportsToIds: e.reportsToIds || (e.reportsToId ? [e.reportsToId] : []),
-                        systemRole: e.systemRole,
-                        birthday: e.birthday ? (e.birthday.toDate ? e.birthday.toDate().toISOString() : new Date(e.birthday).toISOString()) : null,
-                      }}
-                      roles={roleOpts}
-                      managers={managerOpts}
-                      systemRoles={systemRoleOpts}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <PeopleTable
+          employees={departmentEmployees}
+          roles={roleOpts}
+          managers={managerOpts}
+          systemRoles={systemRoleOpts}
+        />
+      </Card>
+
+      {/* Departments Section */}
+      <Card>
+        <DepartmentManager
+          departments={departmentItems}
+          employees={departmentEmployees}
+          roles={roles.map((r: any) => ({
+            id: r.id,
+            title: r.title,
+            level: r.level,
+            departmentId: r.departmentId || null,
+          }))}
+          systemRoles={systemRoleOpts}
+          managers={managerOpts}
+        />
       </Card>
 
       <Card>

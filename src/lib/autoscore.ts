@@ -13,6 +13,7 @@ export type ScoreableTask = {
   createdAt: Date;
   completedAt: Date | null;
   carryCount: number;
+  reworkCount?: number;
 };
 
 export type KpiForScore = { id: string; weightage: number };
@@ -50,7 +51,7 @@ export function computeAutoScores(
       continue;
     }
     const completed = list.filter((t) => t.status === "CLOSED").length;
-    const rework = list.filter((t) => t.status === "REOPENED" || t.carryCount > 0).length;
+    const rework = list.filter((t) => t.status === "REOPENED" || (t.reworkCount ?? 0) > 0 || t.carryCount > 0).length;
 
     const days = new Set<string>();
     for (const t of list) {

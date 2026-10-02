@@ -6,33 +6,38 @@ import { adminDb } from "@/lib/firebase/admin";
 // notification yet. Marking `notified` happens client-side on dismiss (same
 // pattern as /api/reminders/due), so the toast can keep showing until seen.
 export async function GET() {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ watchers: [] }, { status: 401 });
+  try {
+    const user = await getCurrentUser();
+    if (!user) return NextResponse.json({ watchers: [] }, { status: 401 });
 
-  const watchersSnap = await adminDb.collection("TaskWatcher")
-    .where("employeeId", "==", user.id)
-    .where("notified", "==", false)
-    .get();
+    const watchersSnap = await adminDb.collection("TaskWatcher")
+      .where("employeeId", "==", user.id)
+      .where("notified", "==", false)
+      .get();
 
-  const sortedDocs = watchersSnap.docs
-    .sort((a, b) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0))
-    .slice(0, 10);
+    const sortedDocs = watchersSnap.docs
+      .sort((a, b) => (b.data().createdAt?.toMillis?.() ?? 0) - (a.data().createdAt?.toMillis?.() ?? 0))
+      .slice(0, 10);
 
-  // Parallel fetch — replace sequential N+1 loop
-  const results = await Promise.all(
-    sortedDocs.map(async (w: any) => {
-      const wd = w.data();
-      const taskDoc = await adminDb.collection("Task").doc(wd.taskId).get();
-      if (!taskDoc.exists || taskDoc.data()!.deletedAt) return null;
-      return {
-        id: w.id,
-        taskId: wd.taskId,
-        title: taskDoc.data()!.title,
-      };
-    })
-  );
+    // Parallel fetch — replace sequential N+1 loop
+    const results = await Promise.all(
+      sortedDocs.map(async (w: any) => {
+        const wd = w.data();
+        const taskDoc = await adminDb.collection("Task").doc(wd.taskId).get();
+        if (!taskDoc.exists || taskDoc.data()!.deletedAt) return null;
+        return {
+          id: w.id,
+          taskId: wd.taskId,
+          title: taskDoc.data()!.title,
+        };
+      })
+    );
 
-  return NextResponse.json({
-    watchers: results.filter(Boolean),
-  });
+    return NextResponse.json({
+      watchers: results.filter(Boolean),
+    });
+  } catch (error: any) {
+    console.error("[watchers-new] Network/Firestore error:", error?.message || error);
+    return NextResponse.json({ watchers: [] });
+  }
 }

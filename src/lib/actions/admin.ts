@@ -42,7 +42,7 @@ async function hashPassword(pw: string) {
 
 async function requireAdmin() {
   const user = await getCurrentUser();
-  if (!user || !(user.systemRole === "ADMIN" || user.systemRole === "CEO")) return null;
+  if (!user || !(user.systemRole === "ADMIN" || user.systemRole === "CEO" || user.isAdmin)) return null;
   return user;
 }
 
@@ -57,6 +57,7 @@ export async function createEmployee(formData: FormData) {
   const reportsToId = reportsToIds[0] || null;
   const systemRole = String(formData.get("systemRole") || "EMPLOYEE");
   const bday = String(formData.get("birthday") || "");
+  const departmentId = String(formData.get("departmentId") || "") || null;
   const password = String(formData.get("password") || "").trim() || "password123";
   if (!name || !email || !roleId) return { error: "Name, email and role are required" };
 
@@ -75,6 +76,7 @@ export async function createEmployee(formData: FormData) {
     name,
     email,
     roleId,
+    departmentId,
     reportsToId,
     reportsToIds,
     systemRole,
@@ -308,6 +310,8 @@ export async function updateEmployee(formData: FormData) {
   const systemRole = String(formData.get("systemRole") || "EMPLOYEE");
   const bday = String(formData.get("birthday") || "");
   const password = String(formData.get("password") || "");
+  const hasDeptField = formData.has("departmentId");
+  const departmentId = hasDeptField ? (String(formData.get("departmentId") || "") || null) : undefined;
 
   if (!id || !name || !email || !roleId) {
     return { error: "ID, name, email and role are required" };
@@ -323,6 +327,10 @@ export async function updateEmployee(formData: FormData) {
     birthday: bday ? new Date(bday) : null,
     updatedAt: new Date()
   };
+
+  if (departmentId !== undefined) {
+    updates.departmentId = departmentId;
+  }
 
   const avatarFile = formData.get("avatarFile") as File | null;
   if (avatarFile && avatarFile.size > 0) {
@@ -362,7 +370,7 @@ export async function createDepartment(formData: FormData) {
   const existsSnap = await adminDb.collection("Department").where("name", "==", name).limit(1).get();
   if (!existsSnap.empty) return { error: "That department already exists" };
 
-  await adminDb.collection("Department").add({
+  const docRef = await adminDb.collection("Department").add({
     name,
     createdAt: new Date(),
   });
@@ -371,12 +379,197 @@ export async function createDepartment(formData: FormData) {
     actorId: admin.id,
     action: "department.create",
     entity: "Department",
+    entityId: docRef.id,
     detail: name,
     createdAt: new Date(),
   });
 
   revalidatePath("/admin");
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/daily-reports");
+  return { ok: true, id: docRef.id };
+}
+
+export async function updateDepartment(payload: { id: string; name: string }) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const id = payload.id;
+  const name = String(payload.name || "").trim();
+  if (!id) return { error: "Department ID is required" };
+  if (!name) return { error: "Department name is required" };
+
+  const deptRef = adminDb.collection("Department").doc(id);
+  const deptSnap = await deptRef.get();
+  if (!deptSnap.exists) return { error: "Department not found" };
+
+  // Check name uniqueness among other departments
+  const duplicateSnap = await adminDb.collection("Department").where("name", "==", name).get();
+  const hasDuplicate = duplicateSnap.docs.some((d) => d.id !== id);
+  if (hasDuplicate) return { error: "Another department already has this name" };
+
+  await deptRef.update({
+    name,
+    updatedAt: new Date(),
+  });
+
+  await adminDb.collection("AuditLog").add({
+    actorId: admin.id,
+    action: "department.update",
+    entity: "Department",
+    entityId: id,
+    detail: name,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/groups");
+  revalidatePath("/leaderboard");
+  revalidatePath("/daily-reports");
   return { ok: true };
+}
+
+export async function deleteDepartment(departmentId: string) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  if (!departmentId) return { error: "Department ID is required" };
+
+  const deptRef = adminDb.collection("Department").doc(departmentId);
+  const deptSnap = await deptRef.get();
+  if (!deptSnap.exists) return { error: "Department not found" };
+  const deptData = deptSnap.data();
+
+  // 1. Unlink all roles assigned to this department
+  const rolesSnap = await adminDb.collection("Role").where("departmentId", "==", departmentId).get();
+  const roleUpdates = rolesSnap.docs.map((d) => d.ref.update({ departmentId: null, updatedAt: new Date() }));
+
+  // 2. Unlink all employees explicitly assigned to this department
+  const employeesSnap = await adminDb.collection("Employee").where("departmentId", "==", departmentId).get();
+  const employeeUpdates = employeesSnap.docs.map((d) => d.ref.update({ departmentId: null, updatedAt: new Date() }));
+
+  // 3. Unlink all groups assigned to this department
+  const groupsSnap = await adminDb.collection("Group").where("departmentId", "==", departmentId).get();
+  const groupUpdates = groupsSnap.docs.map((d) => d.ref.update({ departmentId: null, updatedAt: new Date() }));
+
+  await Promise.all([...roleUpdates, ...employeeUpdates, ...groupUpdates]);
+
+  // 4. Delete the department document
+  await deptRef.delete();
+
+  await adminDb.collection("AuditLog").add({
+    actorId: admin.id,
+    action: "department.delete",
+    entity: "Department",
+    entityId: departmentId,
+    detail: deptData?.name || departmentId,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/groups");
+  revalidatePath("/leaderboard");
+  revalidatePath("/daily-reports");
+  return { ok: true };
+}
+
+export async function updateEmployeeDepartment(payload: {
+  employeeId: string;
+  departmentId: string | null;
+  roleId?: string;
+}) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not authenticated" };
+
+  const isExecutiveOrManager =
+    user.systemRole === "ADMIN" ||
+    user.systemRole === "CEO" ||
+    user.systemRole === "MANAGER" ||
+    user.isAdmin ||
+    ["CEO / Director", "COO", "GM"].includes(user.role?.title);
+
+  if (!isExecutiveOrManager) {
+    return { error: "Only managers and executives can edit employee departments." };
+  }
+
+  const { employeeId, departmentId, roleId } = payload;
+  if (!employeeId) return { error: "Employee ID is required" };
+
+  const empRef = adminDb.collection("Employee").doc(employeeId);
+  const empSnap = await empRef.get();
+  if (!empSnap.exists) return { error: "Employee not found" };
+
+  const updates: any = {
+    departmentId: departmentId || null,
+    updatedAt: new Date(),
+  };
+  if (roleId) {
+    updates.roleId = roleId;
+  }
+
+  await empRef.update(updates);
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "employee.updateDepartment",
+    entity: "Employee",
+    entityId: employeeId,
+    detail: `Set department to ${departmentId || "General / None"}`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/daily-reports");
+  revalidatePath("/leaderboard");
+  return { ok: true };
+}
+
+export async function assignEmployeesToDepartment(payload: {
+  departmentId: string | null;
+  employeeIds: string[];
+}) {
+  const admin = await requireAdmin();
+  if (!admin) return { error: "Not authorized" };
+
+  const { departmentId, employeeIds } = payload;
+  if (!Array.isArray(employeeIds) || employeeIds.length === 0) {
+    return { error: "No employees selected" };
+  }
+
+  const updates = employeeIds.map((empId) =>
+    adminDb.collection("Employee").doc(empId).update({
+      departmentId: departmentId || null,
+      updatedAt: new Date(),
+    })
+  );
+
+  await Promise.all(updates);
+
+  await adminDb.collection("AuditLog").add({
+    actorId: admin.id,
+    action: "department.assignEmployees",
+    entity: "Department",
+    entityId: departmentId || "general",
+    detail: `Assigned ${employeeIds.length} employee(s)`,
+    createdAt: new Date(),
+  });
+
+  revalidatePath("/admin");
+  revalidatePath("/org");
+  revalidatePath("/people");
+  revalidatePath("/daily-reports");
+  return { ok: true };
+}
+
+export async function removeEmployeeFromDepartment(employeeId: string) {
+  return updateEmployeeDepartment({ employeeId, departmentId: null });
 }
 
 export async function createSystemRole(formData: FormData) {

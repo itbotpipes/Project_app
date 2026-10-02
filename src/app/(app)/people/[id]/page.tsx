@@ -1,14 +1,10 @@
 import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft } from "lucide-react";
-import { getCurrentUser, isManagerLike, canScoreCompanyWide, hasPermission } from "@/lib/auth";
+import { getCurrentUser, canScoreCompanyWide, hasPermission } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
-import { monthLabel } from "@/lib/scores";
 import { loadEmployeePerformance } from "@/lib/employeePerformance";
-import { Card, StatCard, SectionTitle, Badge } from "../../_components/ui";
-import { DualTrendLine, Donut, Legend, IncrementBar } from "../../_components/Charts";
-import BucketFill from "../../_components/BucketFill";
-import KpiAnalyticsSection from "../../_components/KpiAnalyticsSection";
+import SimplifiedPerformanceView from "../../_components/SimplifiedPerformanceView";
 
 export default async function EmployeePerformancePage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -48,22 +44,7 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
   const allowed = canScoreCompanyWide(user) || reportsToIds.includes(user.id) || employee.id === user.id;
   if (!allowed) redirect("/people");
 
-  const {
-    trend,
-    latestFinal,
-    avg,
-    band,
-    ready,
-    nowYear,
-    kpiComponent,
-    behaviourComponent,
-    targetComponent,
-    incrementTotal,
-    history,
-    bucketData,
-    bucketFillData,
-    kpiAnalytics,
-  } = await loadEmployeePerformance(id);
+  const performanceData = await loadEmployeePerformance(id);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
@@ -85,97 +66,14 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
         </div>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="6-month average" value={avg.toFixed(0)} tone="blue" />
-        <StatCard label="Increment band" value={<span className={band.className}>{band.label}</span>} sub="per company policy" />
-        <StatCard
-          label="Latest score"
-          value={latestFinal ? Math.round(latestFinal.total) : "—"}
-          sub={latestFinal ? monthLabel(latestFinal.year, latestFinal.month) : "not yet scored"}
-          tone="blue"
-        />
-        <Card>
-          <div className="text-xs font-medium uppercase tracking-wide text-slate-500">Promotion readiness</div>
-          <div className="mt-2">
-            <Badge className={ready.tone}>{ready.label}</Badge>
-          </div>
-        </Card>
-      </div>
-
-      <div className="grid gap-6 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
-          <SectionTitle>Score trend — Auto vs Manager</SectionTitle>
-          {trend.length ? (
-            <DualTrendLine data={trend} />
-          ) : (
-            <div className="grid h-[220px] place-items-center text-sm text-slate-400">No scores yet.</div>
-          )}
-        </Card>
-        <Card>
-          <SectionTitle>KPI buckets (weightage)</SectionTitle>
-          <Donut data={bucketData} />
-          <Legend data={bucketData} />
-        </Card>
-      </div>
-
-      {kpiAnalytics && <KpiAnalyticsSection analytics={kpiAnalytics} />}
-
-      <Card>
-        <SectionTitle>📅 Monthly score history</SectionTitle>
-        {history.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-[11px] uppercase tracking-wide text-slate-400">
-                  <th className="pb-1 font-medium">Month</th>
-                  <th className="pb-1 text-center font-medium">Auto</th>
-                  <th className="pb-1 text-center font-medium">Final</th>
-                  <th className="pb-1 text-center font-medium">Behaviour</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {history.map((h) => (
-                  <tr key={h.key}>
-                    <td className="py-1.5 font-medium text-slate-700">{h.label}</td>
-                    <td className="py-1.5 text-center text-blue-600">{h.auto ? Math.round(h.auto) : "—"}</td>
-                    <td className="py-1.5 text-center font-semibold text-violet-700">{Math.round(h.total)}</td>
-                    <td className="py-1.5 text-center text-amber-700">{h.behaviour != null ? `${h.behaviour.toFixed(1)}/10` : "—"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-sm text-slate-400">No monthly scores recorded yet.</p>
-        )}
-        <p className="mt-3 text-xs text-slate-500">
-          Every past month is kept on record — nothing is ever cleared. Use the{" "}
-          <Link href="/scores" className="text-blue-600 hover:underline">
-            Scoring Panel
-          </Link>{" "}
-          to adjust any specific month&apos;s figures.
-        </p>
-      </Card>
-
-      <Card>
-        <SectionTitle>🔥 What they&apos;ve worked on this month</SectionTitle>
-        <BucketFill buckets={bucketFillData} />
-      </Card>
-
-      <Card>
-        <SectionTitle>📈 Annual increment projection ({nowYear})</SectionTitle>
-        <IncrementBar kpi={kpiComponent} behaviour={behaviourComponent ?? 0} target={targetComponent ?? 0} maxTotal={20} />
-        <p className="mt-3 text-xs text-slate-500">
-          <b>5%</b> task/KPI performance, <b>5%</b> behaviour, <b>10%</b> target vs. actual.{" "}
-          {behaviourComponent == null || targetComponent == null ? (
-            <span className="text-amber-600">Behaviour and/or target not yet set for this year.</span>
-          ) : (
-            <>
-              Projected minimum increment: <b className="text-slate-800">{Math.round(incrementTotal * 10) / 10}%</b>.
-            </>
-          )}
-        </p>
-      </Card>
+      <SimplifiedPerformanceView
+        employeeName={employee.name}
+        roleTitle={employee.role.title}
+        departmentName={employee.role.department?.name}
+        reportsToName={employee.reportsTo?.name}
+        performanceData={performanceData}
+        isManagerOrAdmin={true}
+      />
     </div>
   );
 }

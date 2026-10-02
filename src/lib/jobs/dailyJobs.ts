@@ -3,7 +3,6 @@ import { adminDb } from "@/lib/firebase/admin";
 import { computeAutoScores } from "@/lib/autoscore";
 import { previousMonthStart } from "@/lib/date";
 import { FieldValue } from "firebase-admin/firestore";
-import { batchFetchByIds } from "@/lib/cache";
 
 function toDate(val: any): Date | null {
   if (!val) return null;
@@ -61,23 +60,41 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
   const employees = employeesSnap.docs
     ? (employeesSnap.docs.map(d => ({ id: d.id, ...d.data() })) as any[])
     : [];
-  const roleIds = [...new Set(employees.map(e => e.roleId).filter(Boolean))];
+  const roleIds = [...new Set(employees.map(e => e.roleId).filter(Boolean))] as string[];
 
-  // Batch fetch all KPI templates by role IDs (parallel, chunk size 30)
-  const kpisMap = await batchFetchByIds("KpiTemplate", roleIds, adminDb);
+  // Batch fetch all KPI templates by roleId in chunks of 30
+  const roleChunks: string[][] = [];
+  const CHUNK_SIZE = 30;
+  for (let i = 0; i < roleIds.length; i += CHUNK_SIZE) {
+    roleChunks.push(roleIds.slice(i, i + CHUNK_SIZE));
+  }
 
-  // Group KPIs by role
   const kpisByRole = new Map<string, any[]>();
-  kpisMap.forEach((kpi: any) => {
-    const roleId = kpi.roleId;
-    if (!kpisByRole.has(roleId)) kpisByRole.set(roleId, []);
-    kpisByRole.get(roleId)!.push(kpi);
-  });
+  if (roleChunks.length > 0) {
+    const kpiSnaps = await Promise.all(
+      roleChunks.map(chunk =>
+        adminDb.collection("KpiTemplate")
+          .where("roleId", "in", chunk)
+          .get()
+      )
+    );
+
+    kpiSnaps.forEach(snap => {
+      snap.docs.forEach((doc: any) => {
+        const kpi = { id: doc.id, ...doc.data() };
+        const rId = kpi.roleId;
+        if (rId) {
+          if (!kpisByRole.has(rId)) kpisByRole.set(rId, []);
+          kpisByRole.get(rId)!.push(kpi);
+        }
+      });
+    });
+  }
 
   const empIds = employees.map(e => e.id);
   const tasksByEmp = new Map<string, any[]>();
 
-  // Chunk into groups of 30 and fetch in PARALLEL (was sequential)
+  // Chunk into groups of 30 and fetch in PARALLEL
   const CHUNK = 30;
   const chunks: string[][] = [];
   for (let i = 0; i < empIds.length; i += CHUNK) chunks.push(empIds.slice(i, i + CHUNK));
@@ -92,12 +109,15 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
     )
   );
 
-  // Accumulate tasks per employee (date filtering now done by Firestore)
+  // Accumulate tasks per employee (excluding soft-deleted tasks)
   for (const snap of taskSnaps) {
     for (const doc of snap.docs) {
       const t = doc.data();
+      if (t.deletedAt) continue;
       const task: any = {
         ...t,
+        carryCount: t.carryCount ?? 0,
+        reworkCount: t.reworkCount ?? 0,
         completedAt: toDate(t.completedAt),
         createdAt: toDate(t.createdAt) ?? new Date(0),
       };

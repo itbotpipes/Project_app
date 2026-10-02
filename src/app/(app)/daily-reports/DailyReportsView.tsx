@@ -205,10 +205,10 @@ export default function DailyReportsView({
           </p>
         </div>
 
-        {/* Closed Tasks Today */}
+        {/* Closed Tasks */}
         <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
           <div className="flex items-center justify-between text-xs font-medium uppercase tracking-wide text-slate-400">
-            <span>Tasks Closed Today</span>
+            <span>{summary.isToday ? "Tasks Closed Today" : "Tasks Closed on Date"}</span>
             <CheckCircle2 className="h-4 w-4 text-blue-500" />
           </div>
           <div className="mt-2 flex items-baseline gap-1.5">
@@ -393,9 +393,10 @@ export default function DailyReportsView({
                   <div>
                     <div className="flex items-center gap-2">
                       <Link
-                        href={`/people/${emp.id}`}
+                        href={`/daily-reports/${emp.id}?range=daily&date=${summary.dateValue}`}
                         onClick={(e) => e.stopPropagation()}
                         className="font-bold text-slate-900 hover:text-blue-600 hover:underline flex items-center gap-1"
+                        title="View Employee Task & KPI Work Report"
                       >
                         {emp.name}
                         <ArrowUpRight size={13} className="text-slate-400" />
@@ -521,7 +522,7 @@ export default function DailyReportsView({
                             <th className="px-2 py-2.5">Priority</th>
                             <th className="px-2 py-2.5">Timeliness</th>
                             <th className="px-2 py-2.5">Notes / Reasons</th>
-                            <th className="py-2.5 pl-2 pr-3 text-right">Estimate</th>
+                            <th className="py-2.5 pl-2 pr-3 text-right">Planned Load</th>
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100">
@@ -574,16 +575,21 @@ export default function DailyReportsView({
                               </td>
                               <td className="px-2 py-2.5 text-slate-600">
                                 {task.rejectionReason && (
-                                  <span className="text-red-700 font-medium">
+                                  <span className="text-red-700 font-medium block">
                                     ↩ Rework: {task.rejectionReason}
                                   </span>
                                 )}
                                 {task.holdReason && (
-                                  <span className="text-amber-700 font-medium">
+                                  <span className="text-amber-700 font-medium block">
                                     On hold: {task.holdReason}
                                   </span>
                                 )}
-                                {!task.rejectionReason && !task.holdReason && (
+                                {task.carryCount > 0 && (
+                                  <span className="text-amber-600 font-medium block">
+                                    ↻ Carried forward
+                                  </span>
+                                )}
+                                {!task.rejectionReason && !task.holdReason && task.carryCount === 0 && (
                                   <span className="text-slate-400">—</span>
                                 )}
                               </td>
@@ -597,7 +603,7 @@ export default function DailyReportsView({
                     </div>
                   ) : (
                     <div className="rounded-xl border border-dashed border-slate-200 bg-white p-4 text-center text-xs text-slate-400">
-                      No tasks were created or completed by {emp.name} on this date.
+                      No task activity recorded for {emp.name} on this date.
                     </div>
                   )}
                 </div>

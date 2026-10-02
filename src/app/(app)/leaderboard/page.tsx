@@ -120,10 +120,10 @@ export default async function LeaderboardPage({
         ]);
         sc.docs?.forEach((d: any) => scorecardsAll.push({ ...d.data(), id: d.id }));
         ta.docs?.forEach((d: any) => {
-          tasksAll.push({ ...d.data(), id: d.id });
+          if (!d.data().deletedAt) tasksAll.push({ ...d.data(), id: d.id });
         });
         ca.docs?.forEach((d: any) => {
-          closedTasksAll.push({ ...d.data(), id: d.id });
+          if (!d.data().deletedAt) closedTasksAll.push({ ...d.data(), id: d.id });
         });
       })
     );

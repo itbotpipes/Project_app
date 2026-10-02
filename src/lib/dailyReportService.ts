@@ -1,91 +1,28 @@
 import { adminDb } from "@/lib/firebase/admin";
-import { fetchAllRoles, fetchAllDepartments, batchFetchByIds } from "@/lib/cache";
+import { fetchAllRoles, fetchAllDepartments } from "@/lib/cache";
 import { priorityQuadrant } from "@/lib/constants";
+import { canScoreCompanyWide, isManagerLike, hasPermission } from "@/lib/auth";
+import {
+  type DailyTaskItem,
+  type PersonDailyReport,
+  type DailyReportSummary,
+  type TaskDailyState,
+  getTaskDailyState,
+  toDate,
+  QUAD_TONE,
+} from "./dailyReportState";
 
-export type DailyTaskItem = {
-  id: string;
-  title: string;
-  status: string;
-  priority: string;
-  priorityTone: string;
-  kpiName: string | null;
-  sizeLabel: string | null;
-  estimatedMins: number | null;
-  dueAt: string | null;
-  completedAt: string | null;
-  isOnTime: boolean | null;
-  reworkCount: number;
-  rejectionReason: string | null;
-  holdReason: string | null;
-  carryCount: number;
-};
-
-export type PersonDailyReport = {
-  employee: {
-    id: string;
-    name: string;
-    email?: string;
-    avatarUrl?: string | null;
-    roleTitle: string;
-    departmentName: string;
-    managerName: string;
-  };
-  ritual: {
-    morningPlanned: boolean;
-    eveningClosed: boolean;
-    reflection: string | null;
-    plannedTasksCount: number;
-  };
-  metrics: {
-    closedToday: number;
-    inProgressToday: number;
-    overdueCount: number;
-    reworkCount: number;
-    onTimeRate: number | null; // percentage
-    totalEstimatedMins: number;
-    kpisTouched: string[];
-  };
-  status: "ON_TRACK" | "IN_PROGRESS" | "ATTENTION" | "NO_ACTIVITY";
-  statusLabel: string;
-  statusTone: string;
-  tasks: DailyTaskItem[];
-};
-
-export type DailyReportSummary = {
-  dateValue: string; // YYYY-MM-DD
-  dateLabel: string; // e.g. "Saturday, 26 Sep 2026"
-  isToday: boolean;
-  totalEmployees: number;
-  reportedEmployeesCount: number;
-  totalClosedToday: number;
-  totalOpenToday: number;
-  overallOnTimeRate: number;
-  attentionCount: number;
-  noActivityCount: number;
-  departmentCounts: Record<string, number>;
-  departments: string[];
-  reports: PersonDailyReport[];
-};
-
-function toDate(val: any): Date | null {
-  if (!val) return null;
-  if (val instanceof Date) return val;
-  if (val.toDate) return val.toDate();
-  const parsed = new Date(val);
-  return isNaN(parsed.getTime()) ? null : parsed;
-}
-
-const QUAD_TONE: Record<string, string> = {
-  "Do First": "bg-red-100 text-red-700",
-  Schedule: "bg-blue-100 text-blue-700",
-  Delegate: "bg-amber-100 text-amber-700",
-  Eliminate: "bg-slate-100 text-slate-500",
-};
+export type { DailyTaskItem, PersonDailyReport, DailyReportSummary, TaskDailyState };
+export { getTaskDailyState, toDate };
 
 /**
- * Loads person-wise daily operations report for all employees for a given calendar date.
+ * Loads person-wise daily operations report for permitted employees for a given calendar date.
+ * Completely date-isolated and point-in-time accurate.
  */
-export async function loadCompanyDailyReport(targetDate: Date = new Date()): Promise<DailyReportSummary> {
+export async function loadCompanyDailyReport(
+  targetDate: Date = new Date(),
+  viewerUser?: any
+): Promise<DailyReportSummary> {
   const dayStart = new Date(targetDate);
   dayStart.setHours(0, 0, 0, 0);
   const dayEnd = new Date(dayStart);
@@ -104,14 +41,48 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
     year: "numeric",
   });
 
-  // Fetch active employees, roles, departments, and managers
-  const [employeesSnap, rolesSnap, departmentsSnap, allEmpsSnap, ritualsSnap] = await Promise.all([
-    adminDb.collection("Employee").where("active", "==", true).get(),
+  // ── 1. Determine Permission Scope & Fetch Permitted Employees ──────────────
+  let viewScope: "COMPANY" | "TEAM" | "SELF" = "COMPANY";
+  let employees: any[] = [];
+
+  const [rolesSnap, departmentsSnap, allEmpsSnap] = await Promise.all([
     fetchAllRoles(adminDb),
     fetchAllDepartments(adminDb),
     adminDb.collection("Employee").get(),
-    adminDb.collection("DailyRitual").where("date", "==", dayStart).get(),
   ]);
+
+  const allEmpsMap = new Map<string, any>();
+  const allActiveEmps: any[] = [];
+  allEmpsSnap.docs?.forEach((d: any) => {
+    const data = { id: d.id, ...d.data() };
+    allEmpsMap.set(d.id, data);
+    if (data.active) allActiveEmps.push(data);
+  });
+
+  if (!viewerUser) {
+    employees = allActiveEmps;
+  } else {
+    const canCompany = canScoreCompanyWide(viewerUser) || hasPermission(viewerUser, "scores") || hasPermission(viewerUser, "admin");
+    const isMgr = isManagerLike(viewerUser.systemRole, viewerUser.systemRoleObj) || hasPermission(viewerUser, "team");
+
+    if (canCompany) {
+      viewScope = "COMPANY";
+      employees = allActiveEmps;
+    } else if (isMgr) {
+      viewScope = "TEAM";
+      const reportEmps = allActiveEmps.filter((e) => {
+        const mgrIds = Array.isArray(e.reportsToIds) ? e.reportsToIds : e.reportsToId ? [e.reportsToId] : [];
+        return mgrIds.includes(viewerUser.id) || e.id === viewerUser.id;
+      });
+      employees = reportEmps.length > 0 ? reportEmps : (allEmpsMap.get(viewerUser.id) ? [allEmpsMap.get(viewerUser.id)] : []);
+    } else {
+      viewScope = "SELF";
+      const selfEmp = allEmpsMap.get(viewerUser.id);
+      employees = selfEmp ? [selfEmp] : [];
+    }
+  }
+
+  employees.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
   const rolesMap = new Map<string, any>();
   rolesSnap.docs?.forEach((d: any) => rolesMap.set(d.id, d.data()));
@@ -119,16 +90,12 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
   const deptsMap = new Map<string, any>();
   departmentsSnap.docs?.forEach((d: any) => deptsMap.set(d.id, d.data().name));
 
-  const allEmpsMap = new Map<string, any>();
-  allEmpsSnap.docs?.forEach((d: any) => allEmpsMap.set(d.id, d.data().name));
-
+  // ── 2. Fetch Rituals for the Target Date ──────────────────────────────────
+  const ritualsSnap = await adminDb.collection("DailyRitual").where("date", "==", dayStart).get();
   const ritualsByEmp = new Map<string, any>();
   ritualsSnap.docs?.forEach((d: any) => ritualsByEmp.set(d.data().employeeId, d.data()));
 
-  const employees = employeesSnap.docs ? employeesSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) : [];
-  employees.sort((a, b) => a.name.localeCompare(b.name));
-
-  // Chunk employee IDs for targeted task queries
+  // ── 3. Fetch Tasks Relevant to Permitted Employees on Target Date ─────────
   const empIds = employees.map((e) => e.id);
   const chunkIds = (ids: string[]) => {
     const chunks = [];
@@ -139,48 +106,160 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
   const tasksMapByEmp = new Map<string, any[]>();
   for (const id of empIds) tasksMapByEmp.set(id, []);
 
-  // Fetch tasks completed today or created today, or open tasks
+  const allRelevantTaskIds = new Set<string>();
+  const tasksById = new Map<string, any>();
+
   if (empIds.length > 0) {
     const chunks = chunkIds(empIds);
     const taskQueries = chunks.map(async (chunk) => {
-      return Promise.all([
-        // Completed on target date
+      const queries = [
+        // Tasks completed on target date
         adminDb.collection("Task")
           .where("assigneeId", "in", chunk)
           .where("completedAt", ">=", dayStart)
           .where("completedAt", "<=", dayEnd)
           .get(),
-        // Created on target date
+        // Tasks created on target date
         adminDb.collection("Task")
           .where("assigneeId", "in", chunk)
           .where("createdAt", ">=", dayStart)
           .where("createdAt", "<=", dayEnd)
           .get(),
-        // Currently active open tasks
+        // Tasks due on target date
         adminDb.collection("Task")
           .where("assigneeId", "in", chunk)
-          .where("status", "!=", "CLOSED")
+          .where("dueAt", ">=", dayStart)
+          .where("dueAt", "<=", dayEnd)
           .get(),
-      ]);
+      ];
+
+      // For today, also fetch open tasks
+      if (isToday) {
+        queries.push(
+          adminDb.collection("Task")
+            .where("assigneeId", "in", chunk)
+            .where("status", "!=", "CLOSED")
+            .get()
+        );
+      } else {
+        // For past dates, query tasks due before dayStart that were completed after dayStart or still open
+        queries.push(
+          adminDb.collection("Task")
+            .where("assigneeId", "in", chunk)
+            .where("dueAt", "<", dayStart)
+            .get()
+        );
+      }
+
+      return Promise.all(queries);
     });
 
     const taskSnapResults = await Promise.all(taskQueries);
-    const seenTaskIds = new Set<string>();
 
-    for (const [closedSnap, createdSnap, openSnap] of taskSnapResults) {
-      const allDocs = [...(closedSnap.docs || []), ...(createdSnap.docs || []), ...(openSnap.docs || [])];
-      for (const doc of allDocs) {
-        if (seenTaskIds.has(doc.id)) continue;
-        seenTaskIds.add(doc.id);
-        const data = doc.data();
-        if (data.deletedAt) continue;
-        const assigneeId = data.assigneeId;
-        if (assigneeId && tasksMapByEmp.has(assigneeId)) {
-          tasksMapByEmp.get(assigneeId)!.push({ id: doc.id, ...data });
+    for (const snapGroup of taskSnapResults) {
+      for (const snap of snapGroup) {
+        for (const doc of snap.docs || []) {
+          const data = doc.data();
+          allRelevantTaskIds.add(doc.id);
+          tasksById.set(doc.id, { id: doc.id, ...data });
         }
       }
     }
   }
+
+  // ── 4. Fetch AuditLogs on Target Date (to capture comments, moves, reworks, carries)
+  const auditLogsSnap = await adminDb.collection("AuditLog")
+    .where("createdAt", ">=", dayStart)
+    .where("createdAt", "<=", dayEnd)
+    .get();
+
+  const extraTaskIdsToFetch = new Set<string>();
+  const logsByTaskId = new Map<string, any[]>();
+
+  for (const doc of auditLogsSnap.docs || []) {
+    const l = doc.data();
+    if (l.entity === "Task" && l.entityId) {
+      if (!logsByTaskId.has(l.entityId)) logsByTaskId.set(l.entityId, []);
+      logsByTaskId.get(l.entityId)!.push(l);
+
+      if (!tasksById.has(l.entityId)) {
+        extraTaskIdsToFetch.add(l.entityId);
+      }
+    }
+  }
+
+  // Fetch any missing tasks referenced in AuditLogs
+  if (extraTaskIdsToFetch.size > 0) {
+    const extraIds = Array.from(extraTaskIdsToFetch);
+    const extraChunks = chunkIds(extraIds);
+    await Promise.all(
+      extraChunks.map(async (c) => {
+        const snap = await adminDb.collection("Task").where("__name__", "in", c).get();
+        snap.docs?.forEach((d) => {
+          tasksById.set(d.id, { id: d.id, ...d.data() });
+          allRelevantTaskIds.add(d.id);
+        });
+      })
+    );
+  }
+
+  // ── 5. Fetch Historical Audit Logs for Status Reconstruction Up to dayEnd ─
+  const relevantTaskIdsList = Array.from(allRelevantTaskIds);
+  if (relevantTaskIdsList.length > 0) {
+    const taskChunks = chunkIds(relevantTaskIdsList);
+    const historySnaps = await Promise.all(
+      taskChunks.map((c) =>
+        adminDb.collection("AuditLog")
+          .where("entity", "==", "Task")
+          .where("entityId", "in", c)
+          .get()
+      )
+    );
+
+    for (const snap of historySnaps) {
+      for (const doc of snap.docs || []) {
+        const logData = doc.data();
+        const taskId = logData.entityId;
+        if (taskId) {
+          if (!logsByTaskId.has(taskId)) logsByTaskId.set(taskId, []);
+          const existing = logsByTaskId.get(taskId)!;
+          if (!existing.some((e) => e.id === doc.id || (e.createdAt?.seconds === logData.createdAt?.seconds && e.action === logData.action))) {
+            existing.push({ id: doc.id, ...logData });
+          }
+        }
+      }
+    }
+  }
+
+  // ── 6. Fetch Checklist Items for Relevant Tasks ───────────────────────────
+  const checklistByTaskId = new Map<string, any[]>();
+  if (relevantTaskIdsList.length > 0) {
+    const taskChunks = chunkIds(relevantTaskIdsList);
+    const checkSnaps = await Promise.all(
+      taskChunks.map((c) =>
+        adminDb.collection("ChecklistItem").where("taskId", "in", c).get()
+      )
+    );
+
+    for (const snap of checkSnaps) {
+      for (const doc of snap.docs || []) {
+        const data = doc.data();
+        const taskId = data.taskId;
+        if (taskId) {
+          if (!checklistByTaskId.has(taskId)) checklistByTaskId.set(taskId, []);
+          checklistByTaskId.get(taskId)!.push(data);
+        }
+      }
+    }
+  }
+
+  // Distribute tasks to employees
+  tasksById.forEach((task) => {
+    const assigneeId = task.assigneeId;
+    if (assigneeId && tasksMapByEmp.has(assigneeId)) {
+      tasksMapByEmp.get(assigneeId)!.push(task);
+    }
+  });
 
   // Preload KPI names
   const allKpisSnap = await adminDb.collection("KpiTemplate").get();
@@ -195,24 +274,28 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
   const deptCounts: Record<string, number> = {};
   const allDeptsSet = new Set<string>();
 
+  // ── 7. Reconstruct Daily State for Each Employee ───────────────────────────
   const reports: PersonDailyReport[] = employees.map((emp: any) => {
     const role = emp.roleId ? rolesMap.get(emp.roleId) : null;
     const roleTitle = role?.title || "Team Member";
-    const departmentName = role?.departmentId ? (deptsMap.get(role.departmentId) || "General") : "General";
+    const departmentName = role?.departmentId ? deptsMap.get(role.departmentId) || "General" : "General";
     allDeptsSet.add(departmentName);
     deptCounts[departmentName] = (deptCounts[departmentName] || 0) + 1;
 
     // Manager
-    const mgrIds = emp.reportsToIds || (emp.reportsToId ? [emp.reportsToId] : []);
-    const mgrNames = mgrIds.map((id: string) => allEmpsMap.get(id)).filter(Boolean);
+    const mgrIds = Array.isArray(emp.reportsToIds) ? emp.reportsToIds : emp.reportsToId ? [emp.reportsToId] : [];
+    const mgrNames = mgrIds.map((id: string) => allEmpsMap.get(id)?.name).filter(Boolean);
     const managerName = mgrNames.length > 0 ? mgrNames.join(", ") : "—";
 
     // Ritual for this date
-    const ritualData = ritualsByEmp.get(emp.id);
+    const ritualData = ritualsByEmp.get(emp.id) || null;
     let plannedTasksCount = 0;
     if (ritualData?.plannedTaskIds) {
       try {
-        const parsed = JSON.parse(ritualData.plannedTaskIds);
+        const parsed =
+          typeof ritualData.plannedTaskIds === "string"
+            ? JSON.parse(ritualData.plannedTaskIds)
+            : ritualData.plannedTaskIds;
         plannedTasksCount = Array.isArray(parsed) ? parsed.length : 0;
       } catch {
         plannedTasksCount = 0;
@@ -220,70 +303,66 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
     }
 
     const rawTasks = tasksMapByEmp.get(emp.id) || [];
-
-    // Filter relevant tasks for this date:
-    // 1. Completed on this date
-    // 2. Created on this date
-    // 3. Open tasks due today or overdue
     const dailyTasks: DailyTaskItem[] = [];
     const kpisTouchedSet = new Set<string>();
     let closedCount = 0;
+    let inProgressCount = 0;
     let onTimeCount = 0;
     let reworkCount = 0;
     let overdueCount = 0;
-    let totalEstMins = 0;
+    let totalPlannedMins = 0;
 
     for (const t of rawTasks) {
-      const createdAt = toDate(t.createdAt);
-      const completedAt = toDate(t.completedAt);
-      const dueAt = toDate(t.dueAt);
-      const isClosed = t.status === "CLOSED";
+      const taskLogs = logsByTaskId.get(t.id) || [];
+      const taskChecklists = checklistByTaskId.get(t.id) || [];
 
-      const completedOnDate = completedAt && completedAt >= dayStart && completedAt <= dayEnd;
-      const createdOnDate = createdAt && createdAt >= dayStart && createdAt <= dayEnd;
-      const isOpen = !isClosed;
-      const isDueOnDate = dueAt && dueAt >= dayStart && dueAt <= dayEnd;
-      const isOverdue = isOpen && dueAt && dueAt.getTime() < dayStart.getTime();
+      const dailyState = getTaskDailyState(
+        t,
+        taskLogs,
+        taskChecklists,
+        ritualData,
+        dayStart,
+        dayEnd,
+        isToday,
+        now
+      );
 
-      // Only include tasks that are relevant to this day's work
-      if (!completedOnDate && !createdOnDate && !isDueOnDate && !isOverdue && !isOpen) {
+      if (!dailyState.relevantForDay) {
         continue;
       }
 
-      if (t.estimatedMins) totalEstMins += t.estimatedMins;
-
+      const dueAt = toDate(t.dueAt);
+      const completedAt = toDate(t.completedAt);
       const kpiName = t.kpiTemplateId ? kpisMap.get(t.kpiTemplateId) ?? null : null;
-      if (kpiName) kpisTouchedSet.add(kpiName);
 
-      // On-time evaluation
-      let isOnTime: boolean | null = null;
-      if (completedAt && dueAt) {
-        isOnTime = completedAt.getTime() <= dueAt.getTime();
-      } else if (completedAt && !dueAt) {
-        isOnTime = true; // completed without deadline is considered on time
-      } else if (!completedAt && dueAt && dueAt.getTime() < now.getTime()) {
-        isOnTime = false;
+      if (kpiName && (dailyState.wasActiveThatDay || dailyState.completedThatDay || dailyState.plannedThatDay)) {
+        kpisTouchedSet.add(kpiName);
       }
 
-      if (completedOnDate) {
+      if (t.estimatedMins && (dailyState.wasActiveThatDay || dailyState.dueThatDay || dailyState.plannedThatDay)) {
+        totalPlannedMins += t.estimatedMins;
+      }
+
+      if (dailyState.completedThatDay) {
         closedCount++;
         totalClosedCount++;
-        if (isOnTime) {
+        if (dailyState.isOnTime === true) {
           onTimeCount++;
           onTimeClosedCount++;
         }
       }
 
-      if (isOpen) {
+      if (dailyState.statusAtEndOfDay !== "CLOSED") {
+        inProgressCount++;
         totalOpenCount++;
       }
 
-      if (isOverdue) {
+      if (dailyState.overdueThatDay) {
         overdueCount++;
       }
 
-      if ((t.reworkCount && t.reworkCount > 0) || t.status === "REOPENED") {
-        reworkCount += t.reworkCount || 1;
+      if (dailyState.reworkedThatDay) {
+        reworkCount++;
       }
 
       const quad = priorityQuadrant(t.urgent, t.important);
@@ -291,7 +370,7 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
       dailyTasks.push({
         id: t.id,
         title: t.title || "Untitled Task",
-        status: t.status,
+        status: dailyState.statusAtEndOfDay || t.status,
         priority: quad,
         priorityTone: QUAD_TONE[quad] ?? "bg-slate-100 text-slate-600",
         kpiName,
@@ -299,11 +378,16 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
         estimatedMins: t.estimatedMins ?? null,
         dueAt: dueAt ? dueAt.toISOString() : null,
         completedAt: completedAt ? completedAt.toISOString() : null,
-        isOnTime,
-        reworkCount: t.reworkCount || 0,
-        rejectionReason: t.rejectionReason ?? null,
-        holdReason: t.holdReason ?? null,
-        carryCount: t.carryCount || 0,
+        isOnTime: dailyState.isOnTime,
+        reworkCount: dailyState.reworkedThatDay ? 1 : 0,
+        rejectionReason: dailyState.rejectionReason,
+        holdReason: dailyState.holdReason,
+        carryCount: dailyState.carriedThatDay ? 1 : 0,
+        wasActiveThatDay: dailyState.wasActiveThatDay,
+        createdThatDay: dailyState.createdThatDay,
+        completedThatDay: dailyState.completedThatDay,
+        dueThatDay: dailyState.dueThatDay,
+        overdueThatDay: dailyState.overdueThatDay,
       });
     }
 
@@ -312,11 +396,19 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
     let statusLabel = "No Activity";
     let statusTone = "bg-slate-100 text-slate-600 border-slate-200";
 
-    const hasAnyAction = dailyTasks.length > 0 || ritualData?.morningPlanned || ritualData?.eveningClosed;
+    const hasAnyAction =
+      dailyTasks.some((t) => t.wasActiveThatDay || t.completedThatDay || t.createdThatDay) ||
+      ritualData?.morningPlanned ||
+      ritualData?.eveningClosed;
 
     if (reworkCount > 0 || overdueCount > 0) {
       status = "ATTENTION";
-      statusLabel = overdueCount > 0 && reworkCount > 0 ? "Overdue & Rework" : reworkCount > 0 ? "Rework Flagged" : "Overdue Tasks";
+      statusLabel =
+        overdueCount > 0 && reworkCount > 0
+          ? "Overdue & Rework"
+          : reworkCount > 0
+          ? "Rework Flagged"
+          : "Overdue Tasks";
       statusTone = "bg-red-50 text-red-700 border-red-200";
       attentionTotal++;
     } else if (closedCount > 0) {
@@ -329,7 +421,7 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
       statusTone = "bg-blue-50 text-blue-700 border-blue-200";
     } else {
       status = "NO_ACTIVITY";
-      statusLabel = "No Activity Today";
+      statusLabel = isToday ? "No Activity Today" : "No Activity on Date";
       statusTone = "bg-slate-100 text-slate-500 border-slate-200";
       noActivityTotal++;
     }
@@ -354,11 +446,12 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
       },
       metrics: {
         closedToday: closedCount,
-        inProgressToday: dailyTasks.filter((t) => t.status !== "CLOSED").length,
+        inProgressToday: inProgressCount,
         overdueCount,
         reworkCount,
         onTimeRate,
-        totalEstimatedMins: totalEstMins,
+        plannedMinutes: totalPlannedMins,
+        totalEstimatedMins: totalPlannedMins,
         kpisTouched: Array.from(kpisTouchedSet),
       },
       status,
@@ -385,5 +478,6 @@ export async function loadCompanyDailyReport(targetDate: Date = new Date()): Pro
     departmentCounts: deptCounts,
     departments: Array.from(allDeptsSet).sort(),
     reports,
+    viewScope,
   };
 }

@@ -26,7 +26,7 @@ export default async function DailyReportsPage({
     }
   }
 
-  const summary = await loadCompanyDailyReport(targetDate);
+  const summary = await loadCompanyDailyReport(targetDate, user);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">

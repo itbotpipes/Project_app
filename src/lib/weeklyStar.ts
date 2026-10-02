@@ -1,6 +1,6 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { mondayOf } from "@/lib/date";
-import { fetchAllRoles, batchFetchByIds } from "@/lib/cache";
+import { batchFetchByIds } from "@/lib/cache";
 
 export type WeeklyStarRow = {
   id: string;
@@ -36,8 +36,8 @@ export async function computeWeeklyStars(): Promise<WeeklyStarRow[]> {
   ]);
 
 
-  // Firestore already filtered completedAt >= weekStart, so all docs in this snap are this week.
-  const filteredClosedTasks = closedTasksSnap.docs ?? [];
+  // Firestore already filtered completedAt >= weekStart, so all docs in this snap are this week (exclude soft-deleted).
+  const filteredClosedTasks = (closedTasksSnap.docs ?? []).filter((d) => !d.data().deletedAt);
 
 
   // Only count KPIs that have weightage > 0

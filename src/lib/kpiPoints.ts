@@ -40,6 +40,24 @@ export type TaskForPoints = {
   checklistDone?: number;
 };
 
+export type CalculationComponent = {
+  key: string;
+  label: string;
+  weight: number; // 0..1, e.g. 0.60
+  weightPct: number; // 0..100, e.g. 60
+  rate: number; // 0..1 achieved rate
+  ratePct: number; // 0..100 achieved %
+  contributionPoints: number; // points contributed to this bucket
+  rawMetric: string; // e.g. "3 / 3 closed" or "2 / 6 active days"
+  description: string;
+};
+
+export type CalculationMetadata = {
+  scoringModel: "KPI_BUCKET_AUTO" | "TASK_LEVEL_POINTS" | "NORMALIZED_LIVE_KPI" | "MONTHLY_AUTO_SCORE" | "ANNUAL_INCREMENT";
+  formulaDescription: string;
+  components: CalculationComponent[];
+};
+
 export type IndividualTaskPointsResult = {
   kpiName: string;
   weightage: number;
@@ -58,6 +76,7 @@ export type IndividualTaskPointsResult = {
     carryPenalty: number;
     checklistAdjustment: number;
   };
+  calculationMetadata: CalculationMetadata;
 };
 
 function toDate(val: any): Date | null {
@@ -179,6 +198,45 @@ export function calculateIndividualTaskPoints(
       carryPenalty: carryCount > 0 ? Math.round(maxPoints * 0.25 * carryPenaltyRate * 10) / 10 : 0,
       checklistAdjustment: Math.round(checklistFactor * 100),
     },
+    calculationMetadata: {
+      scoringModel: "TASK_LEVEL_POINTS",
+      formulaDescription: `Max points (${maxPoints} pts) × (60% Completion + 25% Timeliness + 15% Quality)`,
+      components: [
+        {
+          key: "completion",
+          label: "Completion",
+          weight: 0.60,
+          weightPct: 60,
+          rate: completionFactor * checklistFactor,
+          ratePct: Math.round(completionFactor * checklistFactor * 100),
+          contributionPoints: Math.round(baseCompPoints * 10) / 10,
+          rawMetric: task.status + (task.checklistTotal ? ` (${task.checklistDone ?? 0}/${task.checklistTotal} checklist items)` : ""),
+          description: "Task lifecycle status and checklist completion",
+        },
+        {
+          key: "timeliness",
+          label: "Timeliness & Deadlines",
+          weight: 0.25,
+          weightPct: 25,
+          rate: timelinessRate * (1 - carryPenaltyRate),
+          ratePct: Math.round(timelinessRate * (1 - carryPenaltyRate) * 100),
+          contributionPoints: Math.round(baseTimePoints * 10) / 10,
+          rawMetric: isOnTime === true ? "Delivered on-time" : isOnTime === false ? "Delivered past due date" : "Open task",
+          description: "Delivery relative to target deadline minus carry forward deductions",
+        },
+        {
+          key: "quality",
+          label: "Quality & Rework",
+          weight: 0.15,
+          weightPct: 15,
+          rate: qualityRate,
+          ratePct: Math.round(qualityRate * 100),
+          contributionPoints: Math.round(baseQualPoints * 10) / 10,
+          rawMetric: isReopened ? "Reopened by reviewer" : reworkCount > 0 ? `${reworkCount} rework iteration(s)` : "Completed cleanly without rework",
+          description: "Review approval without being sent back for rework",
+        },
+      ],
+    },
   };
 }
 
@@ -198,6 +256,15 @@ export type KpiBucketAnalytics = {
   tasks: Array<TaskForPoints & {
     pointsResult: IndividualTaskPointsResult;
   }>;
+  calculationMetadata: CalculationMetadata;
+};
+
+export type LiveScoreMetadata = {
+  scoringModel: "NORMALIZED_LIVE_KPI";
+  earnedPoints: number;
+  possiblePoints: number;
+  scorePct: number;
+  formulaDescription: string;
 };
 
 export type KpiPerformanceAnalyticsSummary = {
@@ -210,6 +277,7 @@ export type KpiPerformanceAnalyticsSummary = {
   topPerformingKpi: { name: string; points: number; weightage: number } | null;
   underperformingKpi: { name: string; points: number; weightage: number } | null;
   buckets: KpiBucketAnalytics[];
+  liveScoreMetadata: LiveScoreMetadata;
 };
 
 /**
@@ -271,10 +339,11 @@ export function calculateKpiPerformanceAnalytics(
 
     // Standard auto score calculation for bucket
     let pointsEarned = 0;
+    const completionRate = kpiTasks.length > 0 ? completed / kpiTasks.length : 0;
+    const consistency = Math.min(1, activeDays / 6); // 6 active days = 100%
+    const noRework = kpiTasks.length > 0 ? Math.max(0, 1 - rework / kpiTasks.length) : 1;
+
     if (kpiTasks.length > 0) {
-      const completionRate = completed / kpiTasks.length;
-      const consistency = Math.min(1, activeDays / 6); // 6 active days = 100%
-      const noRework = Math.max(0, 1 - rework / kpiTasks.length);
       const factor = 0.60 * completionRate + 0.25 * consistency + 0.15 * noRework;
       pointsEarned = Math.round(weightage * factor * 10) / 10;
     }
@@ -292,6 +361,46 @@ export function calculateKpiPerformanceAnalytics(
 
     const efficiencyPct = weightage > 0 ? Math.round((pointsEarned / weightage) * 100) : 0;
 
+    const calculationMetadata: CalculationMetadata = {
+      scoringModel: "KPI_BUCKET_AUTO",
+      formulaDescription: `Weightage (${weightage} pts) × (60% Completion + 25% Consistency + 15% Quality)`,
+      components: [
+        {
+          key: "completion",
+          label: "Completion",
+          weight: 0.60,
+          weightPct: 60,
+          rate: completionRate,
+          ratePct: Math.round(completionRate * 100),
+          contributionPoints: kpiTasks.length > 0 ? Math.round(weightage * 0.60 * completionRate * 10) / 10 : 0,
+          rawMetric: `${completed} / ${kpiTasks.length} tasks closed`,
+          description: "Proportion of logged tasks successfully closed",
+        },
+        {
+          key: "consistency",
+          label: "Consistency",
+          weight: 0.25,
+          weightPct: 25,
+          rate: consistency,
+          ratePct: Math.round(consistency * 100),
+          contributionPoints: Math.round(weightage * 0.25 * consistency * 10) / 10,
+          rawMetric: `${activeDays} / 6 active days`,
+          description: "Active work days in this bucket across the month (6+ days = 100%)",
+        },
+        {
+          key: "quality",
+          label: "Quality & No-Rework",
+          weight: 0.15,
+          weightPct: 15,
+          rate: noRework,
+          ratePct: Math.round(noRework * 100),
+          contributionPoints: kpiTasks.length > 0 ? Math.round(weightage * 0.15 * noRework * 10) / 10 : 0,
+          rawMetric: rework > 0 ? `${rework} task(s) had rework/carries` : "0 rework / carryovers",
+          description: "Tasks closed without manager reopenings or carryovers",
+        },
+      ],
+    };
+
     buckets.push({
       kpiId: kpi.id,
       kpiName: kpi.kpiName,
@@ -304,14 +413,16 @@ export function calculateKpiPerformanceAnalytics(
       inProgressTasks: inProgress,
       reworkCount: rework,
       activeDays,
-      consistencyScore: Math.round(Math.min(1, activeDays / 6) * 100),
+      consistencyScore: Math.round(consistency * 100),
       tasks: enrichedTasks,
+      calculationMetadata,
     });
   }
 
   const totalPointsEarned = Math.round(sumEarned * 10) / 10;
   const totalPointsMax = sumMax || 100;
   const overallEfficiencyPct = totalPointsMax > 0 ? Math.round((totalPointsEarned / totalPointsMax) * 100) : 0;
+  const scorePct = totalPointsMax > 0 ? Math.round((totalPointsEarned / totalPointsMax) * 1000) / 10 : 0;
 
   // Find top and underperforming buckets
   const sortedBuckets = [...buckets].sort((a, b) => b.efficiencyPct - a.efficiencyPct);
@@ -333,5 +444,12 @@ export function calculateKpiPerformanceAnalytics(
     topPerformingKpi,
     underperformingKpi,
     buckets,
+    liveScoreMetadata: {
+      scoringModel: "NORMALIZED_LIVE_KPI",
+      earnedPoints: totalPointsEarned,
+      possiblePoints: totalPointsMax,
+      scorePct: Math.max(0, Math.min(100, scorePct)),
+      formulaDescription: `(${totalPointsEarned} earned pts ÷ ${totalPointsMax} possible pts) × 100 = ${Math.max(0, Math.min(100, scorePct)).toFixed(1)}%`,
+    },
   };
 }
