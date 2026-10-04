@@ -92,7 +92,7 @@ export default function Sidebar({
     {
       title: "SCORE",
       items: [
-        { href: "/daily-reports", label: "Daily Reports", icon: ClipboardList },
+        { href: "/daily-reports", label: "Reports", icon: ClipboardList },
         { href: "/leaderboard", label: "Leaderboard", icon: Trophy, permission: "leaderboard" },
         { href: "/team", label: "My Team", icon: Users, permission: "team" },
         { href: "/performance", label: "Performance", icon: TrendingUp, permission: "performance" },

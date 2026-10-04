@@ -30,8 +30,8 @@ export default async function AppLayout({
     <TaskDrawerProvider>
       <div className="flex min-h-screen">
         {/* Sidebar */}
-        <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col">
-          <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-4">
+        <aside className="hidden w-60 shrink-0 border-r border-slate-200 bg-white md:flex md:flex-col sticky top-0 h-screen overflow-hidden z-20">
+          <div className="flex items-center gap-2 border-b border-slate-200 px-4 py-4 shrink-0">
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src="/logo2.jpeg" alt="Northern Star Engineering" className="h-9 w-auto object-contain" />
             <div className="leading-tight">
@@ -41,23 +41,25 @@ export default async function AppLayout({
               <div className="text-[11px] text-slate-500">Northern Star Engineering</div>
             </div>
           </div>
-          <Sidebar
-            userPermissions={user.role?.permissions || null}
-            systemRole={user.systemRole}
-            isManager={isManagerLike(user.systemRole)}
-            canScore={canScoreCompanyWide(user)}
-            canViewAllTasks={
-              user.systemRole === "ADMIN" ||
-              user.systemRole === "CEO" ||
-              ["CEO / Director", "COO"].includes(user.role?.title) ||
-              isManagerLike(user)
-            }
-          />
+          <div className="flex-1 overflow-y-auto">
+            <Sidebar
+              userPermissions={user.role?.permissions || null}
+              systemRole={user.systemRole}
+              isManager={isManagerLike(user.systemRole)}
+              canScore={canScoreCompanyWide(user)}
+              canViewAllTasks={
+                user.systemRole === "ADMIN" ||
+                user.systemRole === "CEO" ||
+                ["CEO / Director", "COO"].includes(user.role?.title) ||
+                isManagerLike(user)
+              }
+            />
+          </div>
         </aside>
 
         {/* Main */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="flex items-center justify-between border-b border-slate-200 bg-white px-5 py-3">
+          <header className="sticky top-0 z-30 flex items-center justify-between border-b border-slate-200 bg-white/95 backdrop-blur px-5 py-3 shadow-xs">
             <div className="text-sm font-semibold text-slate-700 md:hidden">
               Task<span className="text-blue-600">Flow</span>
             </div>

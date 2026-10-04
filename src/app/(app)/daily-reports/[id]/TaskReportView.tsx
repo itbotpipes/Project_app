@@ -146,7 +146,7 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
             className="flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition shadow-sm"
           >
             <ArrowLeft size={14} />
-            Back to Daily Reports
+            Back to Reports
           </Link>
           <span className="text-slate-300">/</span>
           <span className="text-xs font-semibold text-slate-500">Employee Work Report</span>

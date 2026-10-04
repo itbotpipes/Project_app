@@ -118,7 +118,7 @@ export default function DailyReportsView({
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Person-Wise Daily Report</h1>
+            <h1 className="text-2xl font-bold tracking-tight text-slate-900">Reports</h1>
             {summary.isToday && (
               <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-800">
                 Live Today
@@ -126,7 +126,7 @@ export default function DailyReportsView({
             )}
           </div>
           <p className="text-sm text-slate-500">
-            Company-wide individual daily tracking for leadership &amp; management review.
+            Company-wide individual tracking and task analysis for leadership &amp; management review.
           </p>
         </div>
 

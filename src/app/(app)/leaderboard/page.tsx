@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { monthStartOf, previousMonthStart } from "@/lib/date";
@@ -189,10 +190,15 @@ export default async function LeaderboardPage({
         <Card className="border-amber-200 bg-gradient-to-br from-amber-50 to-white">
           <div className="text-xs font-semibold uppercase tracking-wide text-amber-600">⭐ Star of the Week</div>
           {starOfWeek ? (
-            <div className="mt-3 flex items-center gap-4">
+            <Link
+              href={`/people/${starOfWeek.id}`}
+              className="mt-3 flex items-center gap-4 rounded-xl p-2 -m-2 transition hover:bg-amber-100/60 group"
+            >
               <Avatar name={starOfWeek.name} url={starOfWeek.avatarUrl} size={64} ring />
               <div className="min-w-0">
-                <div className="truncate text-lg font-bold text-slate-900">{starOfWeek.name}</div>
+                <div className="truncate text-lg font-bold text-slate-900 group-hover:text-amber-800 transition">
+                  {starOfWeek.name}
+                </div>
                 <div className="truncate text-sm text-slate-500">{starOfWeek.roleTitle}</div>
                 <div className="mt-1 flex flex-wrap gap-1.5">
                   <Badge className="bg-amber-100 text-amber-700">{starOfWeek.closed} closed</Badge>
@@ -200,7 +206,7 @@ export default async function LeaderboardPage({
                   <Badge className="bg-blue-100 text-blue-700">index {starOfWeek.index}</Badge>
                 </div>
               </div>
-            </div>
+            </Link>
           ) : (
             <p className="mt-3 text-sm text-slate-400">No one has closed a task this week yet.</p>
           )}
@@ -214,16 +220,21 @@ export default async function LeaderboardPage({
             🏆 Employee of the Month — {lastMonthStart.toLocaleDateString("en-IN", { month: "long", year: "numeric" })}
           </div>
           {lastMonthTop ? (
-            <div className="mt-3 flex items-center gap-4">
+            <Link
+              href={`/people/${lastMonthTop.employee.id}`}
+              className="mt-3 flex items-center gap-4 rounded-xl p-2 -m-2 transition hover:bg-violet-100/60 group"
+            >
               <Avatar name={lastMonthTop.employee.name} url={lastMonthTop.employee.avatarUrl} size={64} ring />
               <div className="min-w-0">
-                <div className="truncate text-lg font-bold text-slate-900">{lastMonthTop.employee.name}</div>
+                <div className="truncate text-lg font-bold text-slate-900 group-hover:text-violet-800 transition">
+                  {lastMonthTop.employee.name}
+                </div>
                 <div className="truncate text-sm text-slate-500">{lastMonthTop.employee.role?.title}</div>
                 <div className="mt-1">
                   <Badge className="bg-violet-100 text-violet-700">Final score {Math.round(lastMonthTop.total)}</Badge>
                 </div>
               </div>
-            </div>
+            </Link>
           ) : (
             <p className="mt-3 text-sm text-slate-400">No finalized scores for last month yet.</p>
           )}
@@ -238,15 +249,20 @@ export default async function LeaderboardPage({
           <SectionTitle>This week — full ranking</SectionTitle>
           <ol className="space-y-1.5">
             {weeklyStars.slice(0, 10).map((r, i) => (
-              <li key={r.id} className="flex items-center gap-3">
-                <span className={"w-5 text-right text-xs font-bold " + (i === 0 ? "text-amber-600" : "text-slate-400")}>{i + 1}</span>
-                <Avatar name={r.name} url={r.avatarUrl} size={28} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-sm font-medium">{r.name}</div>
-                  <div className="truncate text-xs text-slate-500">{r.roleTitle}</div>
-                </div>
-                <Badge className="bg-slate-100 text-slate-700">{r.closed} closed · {r.onTimeRate}% on time</Badge>
-                <Badge className="bg-blue-50 text-blue-700">{r.index}</Badge>
+              <li key={r.id}>
+                <Link
+                  href={`/people/${r.id}`}
+                  className="flex items-center gap-3 rounded-lg p-1.5 -mx-1.5 transition hover:bg-slate-50 group"
+                >
+                  <span className={"w-5 text-right text-xs font-bold " + (i === 0 ? "text-amber-600" : "text-slate-400")}>{i + 1}</span>
+                  <Avatar name={r.name} url={r.avatarUrl} size={28} />
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-slate-900 group-hover:text-blue-600 transition">{r.name}</div>
+                    <div className="truncate text-xs text-slate-500">{r.roleTitle}</div>
+                  </div>
+                  <Badge className="bg-slate-100 text-slate-700">{r.closed} closed · {r.onTimeRate}% on time</Badge>
+                  <Badge className="bg-blue-50 text-blue-700">{r.index}</Badge>
+                </Link>
               </li>
             ))}
           </ol>

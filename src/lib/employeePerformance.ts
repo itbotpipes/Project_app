@@ -1,9 +1,10 @@
 import { adminDb } from "@/lib/firebase/admin";
 import { incrementBand } from "@/lib/constants";
 import { monthLabel, recentAverage } from "@/lib/scores";
+import { mondayOf, monthStartOf } from "@/lib/date";
 import { behaviourPct, behaviourPctFromMany } from "@/lib/behaviour";
 import { fetchKpiTemplatesByRole, batchFetchByIds } from "@/lib/cache";
-import { calculateKpiPerformanceAnalytics } from "@/lib/kpiPoints";
+import { calculateKpiPerformanceAnalytics, calculateIndividualTaskPoints } from "@/lib/kpiPoints";
 
 export function readiness(avg: number) {
   if (avg >= 75) return { label: "Ready for promotion", tone: "bg-emerald-100 text-emerald-700" };
@@ -13,6 +14,14 @@ export function readiness(avg: number) {
 }
 
 function toNum(val: any): number { return typeof val === "number" ? val : 0; }
+
+function toDate(val: any): Date | null {
+  if (!val) return null;
+  if (val instanceof Date) return val;
+  if (val.toDate) return val.toDate();
+  const parsed = new Date(val);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
 
 function toPlainObject<T>(val: T): T {
   if (val === null || val === undefined) return val;
@@ -54,7 +63,9 @@ export async function loadEmployeePerformance(employeeId: string) {
   const now = new Date();
   const nowYear = now.getFullYear();
   const nowMonth = now.getMonth() + 1;
-  const startOfMonth = new Date(nowYear, now.getMonth(), 1);
+  const startOfMonth = monthStartOf(now);
+  const weekStart = mondayOf(now);
+  const minQueryDate = new Date(Math.min(startOfMonth.getTime(), weekStart.getTime()) - 30 * 86400000);
 
   const [cardsSnap, reviewSnap, behaviourSnap, employeeDoc] = await Promise.all([
     adminDb.collection("MonthlyScorecard").where("employeeId", "==", employeeId).get(),
@@ -131,20 +142,52 @@ export async function loadEmployeePerformance(employeeId: string) {
     : [];
 
   const kraMap = new Map<string, number>();
-  for (const k of kpis) kraMap.set(k.kraName, (kraMap.get(k.kraName) ?? 0) + k.weightage);
+  const kpiMap = new Map<string, any>();
+  for (const k of kpis) {
+    kraMap.set(k.kraName, (kraMap.get(k.kraName) ?? 0) + k.weightage);
+    kpiMap.set(k.id, k);
+  }
   const bucketData = [...kraMap.entries()].map(([name, value]) => ({ name, value }));
 
-  const monthTasksSnap = await adminDb.collection("Task")
-    .where("assigneeId", "==", employeeId)
-    .where("createdAt", ">=", startOfMonth)
-    .get();
+  // Query recent tasks for employee
+  const [createdTasksSnap, completedTasksSnap] = await Promise.all([
+    adminDb.collection("Task")
+      .where("assigneeId", "==", employeeId)
+      .where("createdAt", ">=", minQueryDate)
+      .get(),
+    adminDb.collection("Task")
+      .where("assigneeId", "==", employeeId)
+      .where("completedAt", ">=", minQueryDate)
+      .get(),
+  ]);
 
-  const monthTasks = (monthTasksSnap.docs || [])
-    .filter((d) => !d.data().deletedAt)
-    .map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
+  const rawDocsMap = new Map<string, any>();
+  for (const d of createdTasksSnap.docs || []) {
+    if (!d.data().deletedAt) rawDocsMap.set(d.id, { id: d.id, ...d.data() });
+  }
+  for (const d of completedTasksSnap.docs || []) {
+    if (!d.data().deletedAt) rawDocsMap.set(d.id, { id: d.id, ...d.data() });
+  }
+
+  const allRawTasks = Array.from(rawDocsMap.values()).map((data) => {
+    const createdAt = toDate(data.createdAt);
+    const completedAt = toDate(data.completedAt);
+    const dueAt = toDate(data.dueAt);
+    const parentKpi = data.kpiTemplateId ? kpiMap.get(data.kpiTemplateId) : null;
+    const kpiWeightage = parentKpi?.weightage ?? 20;
+    const kpiName = parentKpi?.kpiName ?? "General / Unassigned";
+    const kraName = parentKpi?.kraName ?? null;
+
+    let isOnTime: boolean | null = null;
+    if (dueAt && completedAt) {
+      isOnTime = completedAt.getTime() <= dueAt.getTime();
+    } else if (completedAt && !dueAt) {
+      isOnTime = true;
+    }
+
+    const pointsCalc = calculateIndividualTaskPoints(
+      {
+        id: data.id,
         title: data.title,
         status: data.status,
         sizeLabel: data.sizeLabel ?? null,
@@ -154,11 +197,51 @@ export async function loadEmployeePerformance(employeeId: string) {
         important: !!data.important,
         carryCount: data.carryCount || 0,
         reworkCount: data.reworkCount || 0,
-        createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || 0),
-        completedAt: data.completedAt?.toDate ? data.completedAt.toDate() : (data.completedAt ? new Date(data.completedAt) : null),
-        dueAt: data.dueAt?.toDate ? data.dueAt.toDate() : (data.dueAt ? new Date(data.dueAt) : null),
-      };
-    });
+        createdAt,
+        completedAt,
+        dueAt,
+      },
+      kpiWeightage,
+      5.0,
+      kpiName
+    );
+
+    return {
+      id: data.id,
+      title: data.title || "Untitled Task",
+      status: data.status,
+      sizeLabel: data.sizeLabel ?? null,
+      estimatedMins: data.estimatedMins ?? null,
+      kpiTemplateId: data.kpiTemplateId ?? null,
+      kpiName,
+      kraName,
+      urgent: !!data.urgent,
+      important: !!data.important,
+      carryCount: data.carryCount || 0,
+      reworkCount: data.reworkCount || 0,
+      createdAt,
+      completedAt,
+      dueAt,
+      isOnTime,
+      earnedPoints: Math.round(pointsCalc.earnedPoints * 10) / 10,
+      maxPoints: Math.round(pointsCalc.maxPoints * 10) / 10,
+      pointsResult: pointsCalc,
+    };
+  });
+
+  // Filter tasks for current month
+  const monthTasks = allRawTasks.filter((t) => {
+    const createdInMonth = t.createdAt && t.createdAt >= startOfMonth;
+    const completedInMonth = t.completedAt && t.completedAt >= startOfMonth;
+    return createdInMonth || completedInMonth;
+  });
+
+  // Filter tasks for current week
+  const weekTasks = allRawTasks.filter((t) => {
+    const createdInWeek = t.createdAt && t.createdAt >= weekStart;
+    const completedInWeek = t.completedAt && t.completedAt >= weekStart;
+    return createdInWeek || completedInWeek;
+  });
 
   const countByKpi = new Map<string, number>();
   for (const t of monthTasks) {
@@ -167,24 +250,88 @@ export async function loadEmployeePerformance(employeeId: string) {
   }
   const bucketFillData = kpis.map((k) => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
 
-  // Compute rich KPI Performance Analytics (bucket-level points & individual task points)
+  // Compute rich KPI Performance Analytics for month & week
   const kpiAnalytics = calculateKpiPerformanceAnalytics(kpis, monthTasks);
+  const weeklyKpiAnalytics = calculateKpiPerformanceAnalytics(kpis, weekTasks);
+
+  // Completed tasks lists
+  const completedTasksThisMonth = monthTasks
+    .filter((t) => t.status === "CLOSED" && t.completedAt && t.completedAt >= startOfMonth)
+    .sort((a, b) => ((b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)));
+
+  const completedTasksThisWeek = weekTasks
+    .filter((t) => t.status === "CLOSED" && t.completedAt && t.completedAt >= weekStart)
+    .sort((a, b) => ((b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)));
+
+  const allCompletedTasks = allRawTasks
+    .filter((t) => t.status === "CLOSED" && t.completedAt)
+    .sort((a, b) => ((b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)));
+
+  // Weekly Stats Summary
+  const weekClosedCount = completedTasksThisWeek.length;
+  const weekTotalTasks = weekTasks.length;
+  const weekOnTimeCount = completedTasksThisWeek.filter((t) => t.isOnTime).length;
+  const weekOnTimeRate = weekClosedCount > 0 ? Math.round((weekOnTimeCount / weekClosedCount) * 100) : 0;
+  const weekActiveDays = weeklyKpiAnalytics?.activeDaysTotal ?? 0;
+  const weekReworkCount = weeklyKpiAnalytics?.buckets.reduce((sum, b) => sum + b.reworkCount, 0) ?? 0;
+  const weekBucketsCovered = new Set(weekTasks.filter((t) => t.kpiTemplateId).map((t) => t.kpiTemplateId)).size;
+  const weekBucketsTotal = kpis.length;
+  const weekCoverageRate = weekBucketsTotal > 0 ? Math.min(1, weekBucketsCovered / weekBucketsTotal) : 0;
+  const weekVolumeScore = Math.min(1, weekClosedCount / 8);
+  const weeklyStarIndex = Math.round(weekOnTimeRate * 0.5 + weekVolumeScore * 100 * 0.3 + weekCoverageRate * 100 * 0.2);
+
+  const weeklyLiveMeta = weeklyKpiAnalytics?.liveScoreMetadata;
+  const weeklyEarnedPoints = weeklyLiveMeta?.earnedPoints ?? weeklyKpiAnalytics?.totalPointsEarned ?? 0;
+  const weeklyPossiblePoints = weeklyLiveMeta?.possiblePoints ?? ((weeklyKpiAnalytics?.totalPointsMax && weeklyKpiAnalytics.totalPointsMax > 0) ? weeklyKpiAnalytics.totalPointsMax : 100);
+  const weeklyLiveScore = weeklyLiveMeta?.scorePct ?? (weeklyPossiblePoints > 0 ? Math.max(0, Math.min(100, Math.round((weeklyEarnedPoints / weeklyPossiblePoints) * 1000) / 10)) : 0);
+
+  const weeklyStats = {
+    closedCount: weekClosedCount,
+    totalTasks: weekTotalTasks,
+    onTimeRate: weekOnTimeRate,
+    activeDays: weekActiveDays,
+    reworkCount: weekReworkCount,
+    bucketsCovered: weekBucketsCovered,
+    bucketsTotal: weekBucketsTotal,
+    weeklyIndex: weeklyStarIndex,
+    earnedPoints: weeklyEarnedPoints,
+    possiblePoints: weeklyPossiblePoints,
+    liveScore: weeklyLiveScore,
+  };
+
+  // Monthly Stats Summary
+  const monthClosedCount = completedTasksThisMonth.length;
+  const monthTotalTasks = monthTasks.length;
+  const monthOnTimeCount = completedTasksThisMonth.filter((t) => t.isOnTime).length;
+  const monthOnTimeRate = monthClosedCount > 0 ? Math.round((monthOnTimeCount / monthClosedCount) * 100) : 0;
+  const monthActiveDays = kpiAnalytics?.activeDaysTotal ?? 0;
+  const monthReworkCount = kpiAnalytics?.buckets.reduce((sum, b) => sum + b.reworkCount, 0) ?? 0;
+  const monthLiveMeta = kpiAnalytics?.liveScoreMetadata;
+  const monthEarnedPoints = monthLiveMeta?.earnedPoints ?? kpiAnalytics?.totalPointsEarned ?? 0;
+  const monthPossiblePoints = monthLiveMeta?.possiblePoints ?? ((kpiAnalytics?.totalPointsMax && kpiAnalytics.totalPointsMax > 0) ? kpiAnalytics.totalPointsMax : 100);
+  const monthLiveScore = monthLiveMeta?.scorePct ?? (monthPossiblePoints > 0 ? Math.max(0, Math.min(100, Math.round((monthEarnedPoints / monthPossiblePoints) * 1000) / 10)) : 0);
+
+  const monthlyStats = {
+    closedCount: monthClosedCount,
+    totalTasks: monthTotalTasks,
+    onTimeRate: monthOnTimeRate,
+    activeDays: monthActiveDays,
+    reworkCount: monthReworkCount,
+    earnedPoints: monthEarnedPoints,
+    possiblePoints: monthPossiblePoints,
+    liveScore: monthLiveScore,
+  };
 
   // Add live current-month point to trend if not already finalized in cards
   const hasCurrentCard = cards.some((c) => c.year === nowYear && c.month === nowMonth);
   const hasLiveActivity = monthTasks.length > 0 || (kpiAnalytics && (kpiAnalytics.totalTasks > 0 || kpiAnalytics.totalPointsEarned > 0));
 
   if (!hasCurrentCard && hasLiveActivity) {
-    const totalPossiblePoints = kpiAnalytics.totalPointsMax > 0 ? kpiAnalytics.totalPointsMax : 100;
-    const earnedPoints = kpiAnalytics.totalPointsEarned;
-    const liveScoreRaw = totalPossiblePoints > 0 ? (earnedPoints / totalPossiblePoints) * 100 : 0;
-    const liveScore = Math.max(0, Math.min(100, Math.round(liveScoreRaw * 10) / 10));
-
     trend.push({
       label: `${monthLabel(nowYear, nowMonth)} • Live`,
       month: monthLabel(nowYear, nowMonth),
-      auto: liveScore,
-      autoScore: liveScore,
+      auto: monthLiveScore,
+      autoScore: monthLiveScore,
       manager: null,
       managerScore: undefined,
       isLive: true,
@@ -240,5 +387,13 @@ export async function loadEmployeePerformance(employeeId: string) {
     bucketData,
     bucketFillData,
     kpiAnalytics,
+    weeklyKpiAnalytics,
+    weeklyStats,
+    monthlyStats,
+    completedTasks: {
+      thisWeek: completedTasksThisWeek,
+      thisMonth: completedTasksThisMonth,
+      all: allCompletedTasks,
+    },
   });
 }
