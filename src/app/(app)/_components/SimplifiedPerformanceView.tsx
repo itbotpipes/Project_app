@@ -748,7 +748,7 @@ export default function SimplifiedPerformanceView({
           <div>
             <div className="flex items-center gap-2">
               <CheckCircle size={18} className="text-emerald-600" />
-              <SectionTitle className="text-lg">Tasks Done &amp; Completed Work</SectionTitle>
+              <SectionTitle className="mb-0">Tasks Done &amp; Completed Work</SectionTitle>
             </div>
             <p className="text-xs text-slate-500 mt-0.5">
               Detailed breakdown of completed tasks, timeliness status, and KPI points earned.

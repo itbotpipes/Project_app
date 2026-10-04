@@ -44,14 +44,16 @@ export function StatCard({
 }
 
 export function SectionTitle({
+  className,
   children,
   action,
 }: {
+  className?: string;
   children: React.ReactNode;
   action?: React.ReactNode;
 }) {
   return (
-    <div className="mb-3 flex items-center justify-between">
+    <div className={cn("mb-3 flex items-center justify-between", className)}>
       <h2 className="text-sm font-semibold uppercase tracking-wide text-slate-500">{children}</h2>
       {action}
     </div>
