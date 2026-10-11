@@ -20,6 +20,8 @@ type TaskLike = {
   project: { name: string } | null;
   assignee?: { name: string } | null;
   creator?: { name: string } | null;
+  managerScore?: number | null;
+  canScore?: boolean;
 };
 
 const quadTone: Record<string, string> = {
@@ -71,6 +73,11 @@ export default function TaskCard({
         {task.reviewRequired && (
           <Badge className="bg-amber-100 text-amber-700">review</Badge>
         )}
+        {task.managerScore != null && (
+          <Badge className="bg-amber-100 text-amber-800 font-semibold" title={`Manager quality score: ${task.managerScore}%`}>
+            🏅 {task.managerScore}%
+          </Badge>
+        )}
         {task.carryCount > 0 && (
           <Badge className="bg-red-50 text-red-600" title="Carried forward from a previous day">
             ↻ carried {task.carryCount}×
@@ -96,7 +103,7 @@ export default function TaskCard({
         </div>
       )}
 
-      <MoveControl taskId={task.id} status={task.status} />
+      <MoveControl taskId={task.id} status={task.status} canScore={task.canScore} />
     </div>
   );
 }

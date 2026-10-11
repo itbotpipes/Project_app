@@ -12,7 +12,7 @@ export const SIZE_EFFORT_MULTIPLIERS: Record<string, number> = {
   xl: 2.0,
 };
 
-export function getSizeMultiplier(sizeLabel: TaskSize, estimatedMins?: number | null): number {
+export function getSizeMultiplier(sizeLabel?: TaskSize | string | null, estimatedMins?: number | null): number {
   if (estimatedMins && estimatedMins > 0) {
     // 60 mins = 1.0 multiplier, clamped between 0.3 and 3.0
     return Math.max(0.3, Math.min(3.0, Math.round((estimatedMins / 60) * 10) / 10));
@@ -38,6 +38,7 @@ export type TaskForPoints = {
   dueAt?: Date | string | null;
   checklistTotal?: number;
   checklistDone?: number;
+  managerScore?: number | null;
 };
 
 export type CalculationComponent = {
@@ -45,6 +46,7 @@ export type CalculationComponent = {
   label: string;
   weight: number; // 0..1, e.g. 0.60
   weightPct: number; // 0..100, e.g. 60
+  maxPoints?: number; // max achievable points for this factor
   rate: number; // 0..1 achieved rate
   ratePct: number; // 0..100 achieved %
   contributionPoints: number; // points contributed to this bucket
@@ -151,7 +153,10 @@ export function calculateIndividualTaskPoints(
   const reworkCount = task.reworkCount || 0;
   const isReopened = task.status === "REOPENED";
   let qualityRate = 1.0;
-  if (isReopened) {
+  if (typeof task.managerScore === "number" && task.managerScore >= 0) {
+    // Explicit manager quality score (0..100)
+    qualityRate = Math.max(0, Math.min(1.0, task.managerScore / 100));
+  } else if (isReopened) {
     qualityRate = 0.3;
   } else if (reworkCount > 0) {
     qualityRate = Math.max(0.4, 1.0 - reworkCount * 0.25);
@@ -207,6 +212,7 @@ export function calculateIndividualTaskPoints(
           label: "Completion",
           weight: 0.60,
           weightPct: 60,
+          maxPoints: Math.round(maxPoints * 0.60 * 10) / 10,
           rate: completionFactor * checklistFactor,
           ratePct: Math.round(completionFactor * checklistFactor * 100),
           contributionPoints: Math.round(baseCompPoints * 10) / 10,
@@ -218,6 +224,7 @@ export function calculateIndividualTaskPoints(
           label: "Timeliness & Deadlines",
           weight: 0.25,
           weightPct: 25,
+          maxPoints: Math.round(maxPoints * 0.25 * 10) / 10,
           rate: timelinessRate * (1 - carryPenaltyRate),
           ratePct: Math.round(timelinessRate * (1 - carryPenaltyRate) * 100),
           contributionPoints: Math.round(baseTimePoints * 10) / 10,
@@ -229,11 +236,16 @@ export function calculateIndividualTaskPoints(
           label: "Quality & Rework",
           weight: 0.15,
           weightPct: 15,
+          maxPoints: Math.round(maxPoints * 0.15 * 10) / 10,
           rate: qualityRate,
           ratePct: Math.round(qualityRate * 100),
           contributionPoints: Math.round(baseQualPoints * 10) / 10,
-          rawMetric: isReopened ? "Reopened by reviewer" : reworkCount > 0 ? `${reworkCount} rework iteration(s)` : "Completed cleanly without rework",
-          description: "Review approval without being sent back for rework",
+          rawMetric: typeof task.managerScore === "number"
+            ? `Manager score: ${task.managerScore}%`
+            : isReopened ? "Reopened by reviewer" : reworkCount > 0 ? `${reworkCount} rework iteration(s)` : "Completed cleanly without rework",
+          description: typeof task.managerScore === "number"
+            ? `Manager reviewed & graded quality at ${task.managerScore}%`
+            : "Review approval without being sent back for rework",
         },
       ],
     },
@@ -370,6 +382,7 @@ export function calculateKpiPerformanceAnalytics(
           label: "Completion",
           weight: 0.60,
           weightPct: 60,
+          maxPoints: Math.round(weightage * 0.60 * 10) / 10,
           rate: completionRate,
           ratePct: Math.round(completionRate * 100),
           contributionPoints: kpiTasks.length > 0 ? Math.round(weightage * 0.60 * completionRate * 10) / 10 : 0,
@@ -381,6 +394,7 @@ export function calculateKpiPerformanceAnalytics(
           label: "Consistency",
           weight: 0.25,
           weightPct: 25,
+          maxPoints: Math.round(weightage * 0.25 * 10) / 10,
           rate: consistency,
           ratePct: Math.round(consistency * 100),
           contributionPoints: Math.round(weightage * 0.25 * consistency * 10) / 10,
@@ -392,6 +406,7 @@ export function calculateKpiPerformanceAnalytics(
           label: "Quality & No-Rework",
           weight: 0.15,
           weightPct: 15,
+          maxPoints: Math.round(weightage * 0.15 * 10) / 10,
           rate: noRework,
           ratePct: Math.round(noRework * 100),
           contributionPoints: kpiTasks.length > 0 ? Math.round(weightage * 0.15 * noRework * 10) / 10 : 0,

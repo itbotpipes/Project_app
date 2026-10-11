@@ -373,3 +373,89 @@ export async function dismissWatcherNotification(formData: FormData) {
   if (!id) return;
   await adminDb.collection("TaskWatcher").doc(id).update({ notified: true });
 }
+
+export async function scoreTask(formData: FormData) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not signed in." };
+
+  const taskId = String(formData.get("taskId") || "");
+  const rawScore = formData.get("score");
+  const feedback = String(formData.get("feedback") || "").trim() || null;
+  const autoClose = formData.get("autoClose") === "true" || formData.get("autoClose") === "on";
+
+  if (!taskId || rawScore == null || rawScore === "") {
+    return { error: "Score is required." };
+  }
+
+  const score = Math.max(0, Math.min(100, Math.round(Number(rawScore))));
+  if (isNaN(score)) return { error: "Invalid score value." };
+
+  const taskDoc = await adminDb.collection("Task").doc(taskId).get();
+  if (!taskDoc.exists) return { error: "Task not found." };
+  const task = taskDoc.data()!;
+
+  // Verify authorization: User must be a manager AND (in loop OR review needed)
+  const isManager = isManagerLike(user.systemRole, (user as any).systemRoleObj);
+  if (!isManager) {
+    return { error: "Only managers can score tasks." };
+  }
+
+  // Check if user is in loop (TaskWatcher)
+  const watcherSnap = await adminDb.collection("TaskWatcher")
+    .where("taskId", "==", taskId)
+    .where("employeeId", "==", user.id)
+    .limit(1)
+    .get();
+  const inLoop = !watcherSnap.empty;
+
+  // Check if review is needed
+  let isAssigneeManager = false;
+  if (task.assigneeId) {
+    const assigneeDoc = await adminDb.collection("Employee").doc(task.assigneeId).get();
+    if (assigneeDoc.exists) {
+      const aData = assigneeDoc.data()!;
+      const reportsToIds = aData.reportsToIds || (aData.reportsToId ? [aData.reportsToId] : []);
+      isAssigneeManager = reportsToIds.includes(user.id);
+    }
+  }
+  const isDirectReviewer = task.reviewerId === user.id;
+  const reviewNeeded = Boolean(task.reviewRequired && (isDirectReviewer || isAssigneeManager || isManager));
+
+  if (!inLoop && !reviewNeeded) {
+    return { error: "You can only score this task if you are in the loop or assigned as the reviewer." };
+  }
+
+  const now = new Date();
+  const updateData: Record<string, any> = {
+    managerScore: score,
+    scoreFeedback: feedback,
+    scoredAt: now,
+    scoredById: user.id,
+    scoredByName: user.name || "Manager",
+    updatedAt: now,
+  };
+
+  // If autoClose is requested (e.g. approving from PENDING_REVIEW)
+  if (autoClose && task.status !== "CLOSED") {
+    updateData.status = "CLOSED";
+    updateData.completedAt = now;
+  }
+
+  await adminDb.collection("Task").doc(taskId).update(updateData);
+
+  await adminDb.collection("AuditLog").add({
+    actorId: user.id,
+    action: "task.score",
+    entity: "Task",
+    entityId: taskId,
+    detail: `Scored ${score}% (${feedback ? `"${feedback}"` : "no feedback"}) by ${user.name}${autoClose ? " (Approved & Closed)" : ""}`,
+    createdAt: now,
+  });
+
+  revalidatePath(`/task/${taskId}`);
+  revalidatePath("/board");
+  revalidatePath("/team");
+  revalidatePath("/delegated");
+  revalidatePath("/all-tasks");
+  return { ok: true, score };
+}

@@ -47,7 +47,7 @@ export default function PeopleTable({
         const matches =
           e.name.toLowerCase().includes(q) ||
           e.email.toLowerCase().includes(q) ||
-          e.role.title.toLowerCase().includes(q) ||
+          (e.role?.title ? e.role.title.toLowerCase().includes(q) : false) ||
           e.systemRole.toLowerCase().includes(q);
         if (!matches) return false;
       }
@@ -153,7 +153,7 @@ export default function PeopleTable({
                   <div className="font-medium text-slate-900">{e.name}</div>
                   <div className="text-xs text-slate-400">{e.email}</div>
                 </td>
-                <td className="py-2 text-slate-600">{e.role.title}</td>
+                <td className="py-2 text-slate-600">{e.role?.title ?? "—"}</td>
                 <td className="py-2">
                   <Badge className="bg-slate-100 text-slate-600">{e.systemRole}</Badge>
                 </td>

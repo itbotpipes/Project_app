@@ -59,8 +59,8 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
         <div>
           <h1 className="text-2xl font-semibold">{employee.name}</h1>
           <p className="text-sm text-slate-500">
-            {employee.role.title}
-            {employee.role.department && <> · {employee.role.department.name}</>}
+            {employee.role?.title ?? "Member"}
+            {employee.role?.department && <> · {employee.role.department.name}</>}
             {employee.reportsTo && <> · reports to {employee.reportsTo.name}</>}
           </p>
         </div>
@@ -68,8 +68,8 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
 
       <SimplifiedPerformanceView
         employeeName={employee.name}
-        roleTitle={employee.role.title}
-        departmentName={employee.role.department?.name}
+        roleTitle={employee.role?.title ?? "Member"}
+        departmentName={employee.role?.department?.name}
         reportsToName={employee.reportsTo?.name}
         performanceData={performanceData}
         isManagerOrAdmin={true}

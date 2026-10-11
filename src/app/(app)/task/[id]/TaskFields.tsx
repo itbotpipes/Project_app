@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { Target, Sparkles, CheckCircle2, AlertCircle, RotateCcw } from "lucide-react";
+import { Target, Sparkles, CheckCircle2, AlertCircle, RotateCcw, Award } from "lucide-react";
 import { TASK_STATUS_LABEL } from "@/lib/constants";
 import { relativeTime } from "@/lib/date";
 import type { TaskDetailData } from "@/lib/taskDetail";
@@ -17,6 +17,7 @@ import EditTaskDialog from "./EditTaskDialog";
 import QuickActions from "./QuickActions";
 import CommentItem from "./CommentItem";
 import TaskTimer from "./TaskTimer";
+import TaskScoreCard from "./TaskScoreCard";
 
 const STATUS_DOT: Record<string, string> = {
   NEW: "bg-slate-400",
@@ -74,6 +75,11 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
             </Link>
           )}
           {task.reviewRequired && <Badge className="bg-amber-100 text-amber-700">needs review</Badge>}
+          {task.managerScore != null && (
+            <Badge className="bg-amber-100 text-amber-800 font-semibold inline-flex items-center gap-1">
+              <Award size={11} /> Score: {task.managerScore}%
+            </Badge>
+          )}
           {task.reworkCount > 0 && <Badge className="bg-red-100 text-red-700">↩ reworked {task.reworkCount}×</Badge>}
         </div>
 
@@ -181,7 +187,7 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
 
         {/* Quick action row */}
         <div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 pt-4">
-          <QuickActions taskId={task.id} status={task.status} />
+          <QuickActions taskId={task.id} status={task.status} canScore={task.canScore} />
           <div className="flex items-center gap-2">
             {task.canEdit && (
               <EditTaskDialog
@@ -198,7 +204,7 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
               />
             )}
             <div className="w-48">
-              <MoveControl taskId={task.id} status={task.status} />
+              <MoveControl taskId={task.id} status={task.status} canScore={task.canScore} />
             </div>
           </div>
         </div>
@@ -259,19 +265,38 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
             <div className="rounded-lg border border-slate-200/80 bg-white p-2.5">
               <span className="text-[10px] uppercase tracking-wide text-slate-400 font-medium block">Quality Index</span>
               <span className="font-semibold mt-0.5 block">
-                {task.reworkCount > 0 ? (
+                {task.managerScore != null ? (
+                  <span className="text-amber-600 flex items-center gap-1"><Award size={11} /> {task.managerScore}%</span>
+                ) : task.reworkCount > 0 ? (
                   <span className="text-red-600 flex items-center gap-1"><RotateCcw size={11} /> {task.reworkCount}× rework</span>
                 ) : (
                   <span className="text-emerald-600 flex items-center gap-1"><CheckCircle2 size={11} /> Clean (100%)</span>
                 )}
               </span>
               <span className="text-[10px] text-slate-400">
-                {task.reworkCount > 0 ? `-${task.kpiPoints.breakdown.reworkPenalty} pts penalty` : "0 rejections"}
+                {task.managerScore != null
+                  ? "Manager score"
+                  : task.reworkCount > 0
+                    ? `-${task.kpiPoints.breakdown.reworkPenalty} pts penalty`
+                    : "0 rejections"}
               </span>
             </div>
           </div>
         </Card>
       )}
+
+      {/* Task Score & Review Card */}
+      <TaskScoreCard
+        taskId={task.id}
+        canScore={task.canScore}
+        inLoop={task.inLoop}
+        isReviewNeeded={task.isReviewNeeded}
+        managerScore={task.managerScore}
+        scoreFeedback={task.scoreFeedback}
+        scoredAt={task.scoredAt}
+        scoredByName={task.scoredByName}
+        maxPoints={task.kpiPoints?.maxPoints ?? 5}
+      />
 
       <Card>
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Checklist</h2>

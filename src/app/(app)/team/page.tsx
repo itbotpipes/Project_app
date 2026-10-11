@@ -149,7 +149,7 @@ export default async function TeamPage() {
                   </div>
                   <div className="min-w-0">
                     <div className="font-medium">{r.name}</div>
-                    <div className="text-xs text-slate-500">{r.role.title}</div>
+                    <div className="text-xs text-slate-500">{r.role?.title ?? "Member"}</div>
                   </div>
                   <div className="ml-auto flex items-center gap-2">
                     <Badge className="bg-blue-100 text-blue-700">

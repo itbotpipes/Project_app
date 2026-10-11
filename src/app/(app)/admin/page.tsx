@@ -140,7 +140,7 @@ export default async function AdminPage() {
       const srObj = systemRoleOpts.find((sr) => sr.name === e.systemRole);
       return srObj ? (srObj.isManager || srObj.isAdmin) : (e.systemRole !== "EMPLOYEE");
     })
-    .map((e: any) => ({ id: e.id, label: `${e.name} (${e.role.title})` }));
+    .map((e: any) => ({ id: e.id, label: `${e.name} (${e.role?.title ?? "Member"})` }));
 
   const departmentItems = departmentsSnap.docs.map((d: any) => ({
     id: d.id,

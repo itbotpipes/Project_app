@@ -79,7 +79,13 @@ export const getCurrentUser = cache(async () => {
     let roleData: any = null;
     if (serializedUser.roleId) {
       const rolesSnap = await fetchAllRoles(adminDb);
-      const roleDoc = rolesSnap.docs?.find((d: any) => d.id === serializedUser.roleId);
+      let roleDoc = rolesSnap.docs?.find((d: any) => d.id === serializedUser.roleId);
+      if (!roleDoc) {
+        const directRole = await adminDb.collection("Role").doc(serializedUser.roleId).get();
+        if (directRole.exists) {
+          roleDoc = { id: directRole.id, data: () => directRole.data() } as any;
+        }
+      }
       
       if (roleDoc) {
         const rawRoleData = roleDoc.data();
@@ -110,6 +116,13 @@ export const getCurrentUser = cache(async () => {
           }
         }
       }
+    }
+
+    if (!roleData) {
+      roleData = {
+        title: serializedUser.customRoleTitle || serializedUser.systemRole || "Employee",
+        level: serializedUser.systemRole === "ADMIN" || serializedUser.systemRole === "CEO" ? 0 : 50,
+      };
     }
     
     const systemRoleDocSnap = await adminDb.collection("SystemRole").where("name", "==", serializedUser.systemRole).limit(1).get();
@@ -145,14 +158,14 @@ export function isManagerLike(userOrRole: any, systemRoleObj?: { isManager: bool
   return userOrRole === "ADMIN" || userOrRole === "CEO" || userOrRole === "MANAGER";
 }
 
-type ScoringUser = { systemRole: string; systemRoleObj?: { isManager: boolean; isAdmin: boolean }; role: { title: string } };
+type ScoringUser = { systemRole: string; systemRoleObj?: { isManager: boolean; isAdmin: boolean }; role?: { title?: string } };
 
 /** Company-wide scoring visibility: ADMIN/CEO always, plus HR (per the COO's request). */
 export function canScoreCompanyWide(user: ScoringUser) {
   const isAdmin = user.systemRoleObj ? user.systemRoleObj.isAdmin : (user.systemRole === "ADMIN" || user.systemRole === "CEO");
   return (
     isAdmin ||
-    user.role.title.toLowerCase().includes("hr")
+    (user.role?.title ? user.role.title.toLowerCase().includes("hr") : false)
   );
 }
 

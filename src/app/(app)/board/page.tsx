@@ -121,6 +121,7 @@ export default async function BoardPage({
       reviewRequired: t.reviewRequired,
       carryCount: t.carryCount ?? 0,
       reworkCount: t.reworkCount ?? 0,
+      managerScore: t.managerScore ?? null,
       kpiTemplateId: t.kpiTemplateId ?? null,
       creatorId: t.creatorId,
       kpiTemplate: kpi ? { kpiName: kpi.kpiName } : null,
@@ -199,6 +200,7 @@ export default async function BoardPage({
       dueAt: t.dueAt,
       checklistTotal: t.checklistItems.length,
       checklistDone: t.checklistItems.filter((c: any) => c.done).length,
+      managerScore: t.managerScore,
     }, kpiData.weightage ?? 20, 5.0, kpiData.kpiName) : null;
 
     return {
@@ -214,6 +216,7 @@ export default async function BoardPage({
       reviewRequired: t.reviewRequired,
       carryCount: t.carryCount,
       reworkCount: t.reworkCount,
+      managerScore: t.managerScore,
       kpiName: t.kpiTemplate?.kpiName ?? null,
       kpiPoints: pointsRes ? { earnedPoints: pointsRes.earnedPoints, maxPoints: pointsRes.maxPoints } : null,
       projectName: t.project?.name ?? null,

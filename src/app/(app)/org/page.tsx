@@ -25,7 +25,7 @@ export default async function OrgChartPage({
     user.systemRole === "ADMIN" ||
     user.systemRole === "CEO" ||
     user.systemRole === "MANAGER" ||
-    ["CEO / Director", "COO", "GM"].includes(user.role?.title);
+    ["CEO / Director", "CEO / MD", "COO", "GM", "General Manager"].includes(user.role?.title);
 
   const [employeesSnap, departmentsSnap, rolesSnap] = await Promise.all([
     adminDb.collection("Employee").where("active", "==", true).get(),
@@ -104,19 +104,17 @@ export default async function OrgChartPage({
 
   // Identify top leader (Director / CEO) - depth 0
   const topPerson =
-    employees.find((e) => e.roleTitle === "CEO / Director" || e.depth === 0) ||
+    employees.find((e) => e.roleTitle.includes("CEO") || e.roleTitle.includes("Director") || e.depth === 0) ||
     employees.find((e) => e.systemRole === "CEO" || e.systemRole === "ADMIN") ||
     employees.find((e) => !e.reportsToId) ||
     employees[0] ||
     null;
 
-  // Identify executive second-in-command (COO Cherry)
-  const cooExecutive = employees.find((e) => {
-    if (e.id === topPerson?.id) return false;
-    return e.roleTitle === "COO" || (e.reportsToId === topPerson?.id && (e.departmentName || "").toLowerCase() === "leadership");
-  }) || null;
-
-  const excludedFromDeptColumns = new Set([topPerson?.id, cooExecutive?.id].filter(Boolean));
+  // Identify leadership members (Chinmay Desai, Cherry Chandak, Kishan Dabhi, Rushi Degdawala)
+  const leadershipEmployees = employees.filter(
+    (e) => (e.departmentName || "").toLowerCase() === "leadership" || e.id === topPerson?.id
+  );
+  const excludedFromDeptColumns = new Set(leadershipEmployees.map((e) => e.id));
 
   // Group ALL operational employees into Department columns ONCE
   // Exclude 'Leadership' and 'test dept' from standard department columns
@@ -143,7 +141,7 @@ export default async function OrgChartPage({
   // Position org data
   const positionData: PositionOrgData = {
     root: topPerson,
-    leadership: cooExecutive ? [cooExecutive] : [],
+    leadership: leadershipEmployees.filter((e) => e.id !== topPerson?.id),
     departments: departmentColumns,
     allDepartments: activeDepartments.map((d) => ({ id: d.id, name: d.name })),
     roles: allRoles,

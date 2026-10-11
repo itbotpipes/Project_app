@@ -298,8 +298,8 @@ export default async function Dashboard() {
         <div>
           <h1 className="text-2xl font-semibold">Good to see you, {user.name.split(" ")[0]} 👋</h1>
           <p className="text-sm text-slate-500">
-            {user.role.title}
-            {user.role.department ? ` · ${user.role.department.name}` : ""}
+            {user.role?.title ?? user.systemRole ?? "Team Member"}
+            {user.role?.department ? ` · ${user.role.department.name}` : ""}
           </p>
         </div>
         {(streak > 0 || badges.length > 0) && (
@@ -492,7 +492,7 @@ export default async function Dashboard() {
                 </span>
                 <div className="min-w-0 flex-1">
                   <div className="truncate text-sm font-medium">{s.employee.name}</div>
-                  <div className="truncate text-xs text-slate-500">{s.employee.role.title}</div>
+                  <div className="truncate text-xs text-slate-500">{s.employee.role?.title ?? "Member"}</div>
                 </div>
                 <Badge className="bg-slate-100 text-slate-700">{Math.round(s.total)}</Badge>
               </li>

@@ -210,20 +210,48 @@ export default function KpiAnalyticsSection({
                     {/* Bucket Factors Breakdown */}
                     <div className="mb-3 grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white p-2.5 text-xs text-slate-600">
                       <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-medium">Completion (60%)</span>
-                        <span className="font-semibold text-slate-800">
-                          {bucket.totalTasks > 0 ? `${Math.round((bucket.completedTasks / bucket.totalTasks) * 100)}%` : "0%"}
-                        </span>
+                        <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-medium">
+                          <span>Completion</span>
+                          <span className="text-blue-600 font-semibold">60% wt</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-1">
+                          <span className="font-bold text-slate-800">
+                            {bucket.totalTasks > 0 ? `${Math.round((bucket.completedTasks / bucket.totalTasks) * 100)}%` : "0%"}
+                          </span>
+                          <span className="text-[11px] font-bold text-violet-700">
+                            {(bucket.totalTasks > 0 ? Math.round(bucket.weightage * 0.60 * (bucket.completedTasks / bucket.totalTasks) * 10) / 10 : 0).toFixed(1)}
+                            <span className="text-[10px] font-normal text-slate-400"> / {(bucket.weightage * 0.60).toFixed(1)} pts</span>
+                          </span>
+                        </div>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-medium">Consistency (25%)</span>
-                        <span className="font-semibold text-slate-800">{bucket.consistencyScore}% ({bucket.activeDays}/6 days)</span>
+                        <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-medium">
+                          <span>Consistency</span>
+                          <span className="text-blue-600 font-semibold">25% wt</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-1">
+                          <span className="font-bold text-slate-800">{bucket.consistencyScore}%</span>
+                          <span className="text-[11px] font-bold text-violet-700">
+                            {(Math.round(bucket.weightage * 0.25 * (bucket.consistencyScore / 100) * 10) / 10).toFixed(1)}
+                            <span className="text-[10px] font-normal text-slate-400"> / {(bucket.weightage * 0.25).toFixed(1)} pts</span>
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-slate-400">({bucket.activeDays}/6 days)</span>
                       </div>
                       <div>
-                        <span className="text-slate-400 block text-[10px] uppercase font-medium">Quality/No Rework (15%)</span>
-                        <span className="font-semibold text-slate-800">
-                          {bucket.totalTasks > 0 ? `${Math.round(Math.max(0, 1 - bucket.reworkCount / bucket.totalTasks) * 100)}%` : "100%"}
-                        </span>
+                        <div className="flex items-center justify-between text-slate-400 text-[10px] uppercase font-medium">
+                          <span>Quality / No Rework</span>
+                          <span className="text-blue-600 font-semibold">15% wt</span>
+                        </div>
+                        <div className="flex items-baseline justify-between mt-1">
+                          <span className="font-bold text-slate-800">
+                            {bucket.totalTasks > 0 ? `${Math.round(Math.max(0, 1 - bucket.reworkCount / bucket.totalTasks) * 100)}%` : "100%"}
+                          </span>
+                          <span className="text-[11px] font-bold text-violet-700">
+                            {(bucket.totalTasks > 0 ? Math.round(bucket.weightage * 0.15 * Math.max(0, 1 - bucket.reworkCount / bucket.totalTasks) * 10) / 10 : 0).toFixed(1)}
+                            <span className="text-[10px] font-normal text-slate-400"> / {(bucket.weightage * 0.15).toFixed(1)} pts</span>
+                          </span>
+                        </div>
                       </div>
                     </div>
 

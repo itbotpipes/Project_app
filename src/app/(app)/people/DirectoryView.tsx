@@ -1,11 +1,12 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useState, useMemo, useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Search, TrendingUp, Award, Users, Filter, Calendar, ArrowUpDown, CheckCircle2, ChevronRight, X } from "lucide-react";
 import Avatar from "../_components/Avatar";
 import { Badge } from "../_components/ui";
+import DirectoryScoreModal from "./DirectoryScoreModal";
 
 export type DirectoryEmployee = {
   id: string;
@@ -25,6 +26,7 @@ export type DirectoryEmployee = {
     tier: "TOP" | "HIGH" | "STANDARD" | "LOW" | "NONE";
     tone: string;
   };
+  canScore?: boolean;
 };
 
 type SortField = "name" | "score" | "avg6Mo" | "increment";
@@ -42,14 +44,27 @@ export default function DirectoryView({
   availableMonths: Array<{ value: string; label: string }>;
 }) {
   const router = useRouter();
+  const [localEmployees, setLocalEmployees] = useState<DirectoryEmployee[]>(employees);
+  const [scoringEmployee, setScoringEmployee] = useState<DirectoryEmployee | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [filterTier, setFilterTier] = useState<"ALL" | "ELIGIBLE" | "TOP" | "REVIEW">("ALL");
   const [sortField, setSortField] = useState<SortField>("name");
   const [sortOrder, setSortOrder] = useState<SortOrder>("asc");
 
+  useEffect(() => {
+    setLocalEmployees(employees);
+  }, [employees]);
+
+  const [selectedYear, selectedMonth] = useMemo(() => {
+    const parts = (selectedMonthValue || "").split("-");
+    const y = parseInt(parts[0], 10) || new Date().getFullYear();
+    const m = parseInt(parts[1], 10) || new Date().getMonth() + 1;
+    return [y, m];
+  }, [selectedMonthValue]);
+
   // Filter and sort employees in the single unified list
   const filteredEmployees = useMemo(() => {
-    return employees
+    return localEmployees
       .filter((e) => {
         // Name / Role / Dept Search
         if (searchQuery.trim()) {
@@ -82,17 +97,17 @@ export default function DirectoryView({
         }
         return sortOrder === "asc" ? diff : -diff;
       });
-  }, [employees, searchQuery, filterTier, sortField, sortOrder]);
+  }, [localEmployees, searchQuery, filterTier, sortField, sortOrder]);
 
   // Overall Statistics
-  const totalEmployees = employees.length;
-  const eligibleCount = employees.filter((e) => e.avg6Months >= 65).length;
-  const topCount = employees.filter((e) => e.avg6Months >= 85).length;
+  const totalEmployees = localEmployees.length;
+  const eligibleCount = localEmployees.filter((e) => e.avg6Months >= 65).length;
+  const topCount = localEmployees.filter((e) => e.avg6Months >= 85).length;
   const company6MoAvg =
-    employees.length > 0
+    localEmployees.length > 0
       ? Math.round(
-          (employees.reduce((acc, e) => acc + e.avg6Months, 0) /
-            employees.filter((e) => e.avg6Months > 0).length || 1) * 10
+          (localEmployees.reduce((acc, e) => acc + e.avg6Months, 0) /
+            localEmployees.filter((e) => e.avg6Months > 0).length || 1) * 10
         ) / 10
       : 0;
 
@@ -361,15 +376,44 @@ export default function DirectoryView({
                     {/* Selected Month Score */}
                     <td className="px-3 py-3 text-center">
                       {e.monthScore != null ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-0.5 font-bold text-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => e.canScore && setScoringEmployee(e)}
+                          disabled={!e.canScore}
+                          className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 font-bold transition ${
+                            e.canScore
+                              ? "bg-slate-100 hover:bg-violet-100 text-slate-800 hover:text-violet-900 border border-transparent hover:border-violet-300 cursor-pointer shadow-2xs"
+                              : "bg-slate-100 text-slate-800 cursor-default"
+                          }`}
+                          title={e.canScore ? `Click to review or edit ${e.name}'s score` : undefined}
+                        >
                           {Math.round(e.monthScore)}
                           <span className="text-[10px] font-normal text-slate-400">pts</span>
-                        </span>
+                        </button>
                       ) : e.monthAutoScore != null ? (
-                        <span className="inline-flex items-center gap-1 rounded-full bg-blue-50 px-2 py-0.5 text-xs text-blue-700" title="Auto score (pending review)">
+                        <button
+                          type="button"
+                          onClick={() => e.canScore && setScoringEmployee(e)}
+                          disabled={!e.canScore}
+                          className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs transition ${
+                            e.canScore
+                              ? "bg-blue-50 hover:bg-violet-100 text-blue-700 hover:text-violet-900 border border-blue-200/60 hover:border-violet-300 cursor-pointer shadow-2xs"
+                              : "bg-blue-50 text-blue-700 cursor-default"
+                          }`}
+                          title={e.canScore ? `Auto score (pending review) - Click to score ${e.name}` : "Auto score (pending review)"}
+                        >
                           ~{Math.round(e.monthAutoScore)}
                           <span className="text-[10px] font-normal text-blue-400">auto</span>
-                        </span>
+                        </button>
+                      ) : e.canScore ? (
+                        <button
+                          type="button"
+                          onClick={() => setScoringEmployee(e)}
+                          className="inline-flex items-center gap-1 rounded-full bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200 px-2.5 py-0.5 text-xs font-semibold cursor-pointer transition shadow-2xs"
+                          title={`Score ${e.name} for this month`}
+                        >
+                          <Award size={11} className="text-violet-600" /> Score
+                        </button>
                       ) : (
                         <span className="text-slate-300">—</span>
                       )}
@@ -411,13 +455,26 @@ export default function DirectoryView({
 
                     {/* Profile & Trend link */}
                     <td className="py-3 pl-2 pr-4 text-right">
-                      <Link
-                        href={`/people/${e.id}`}
-                        className="inline-flex items-center gap-0.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
-                      >
-                        <span>Trend</span>
-                        <ChevronRight size={13} />
-                      </Link>
+                      <div className="flex items-center justify-end gap-2">
+                        {e.canScore && (
+                          <button
+                            type="button"
+                            onClick={() => setScoringEmployee(e)}
+                            className="inline-flex items-center gap-1 rounded-lg bg-violet-50 hover:bg-violet-100 text-violet-700 border border-violet-200/80 px-2.5 py-1 text-xs font-semibold transition shadow-2xs"
+                            title={`Open scoring panel for ${e.name}`}
+                          >
+                            <Award size={12} className="text-violet-600" />
+                            <span>Score</span>
+                          </button>
+                        )}
+                        <Link
+                          href={`/people/${e.id}`}
+                          className="inline-flex items-center gap-0.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
+                        >
+                          <span>Trend</span>
+                          <ChevronRight size={13} />
+                        </Link>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -434,6 +491,23 @@ export default function DirectoryView({
           </table>
         </div>
       </div>
+
+      {/* Direct Scoring Panel Popup Modal */}
+      {scoringEmployee && (
+        <DirectoryScoreModal
+          employee={scoringEmployee}
+          year={selectedYear}
+          month={selectedMonth}
+          monthLabel={selectedMonthLabel}
+          onClose={() => setScoringEmployee(null)}
+          onScoreUpdated={(empId, newScore) => {
+            setLocalEmployees((prev) =>
+              prev.map((emp) => (emp.id === empId ? { ...emp, monthScore: newScore } : emp))
+            );
+            router.refresh();
+          }}
+        />
+      )}
     </div>
   );
 }

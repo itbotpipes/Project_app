@@ -152,6 +152,7 @@ export default async function AllTasksPage({
         holdReason: data.holdReason || null,
         reviewRequired: !!data.reviewRequired,
         carryCount: data.carryCount || 0,
+        managerScore: data.managerScore ?? null,
         priority: quad,
         assignee,
         creator,
@@ -442,6 +443,11 @@ export default async function AllTasksPage({
                         {task.carryCount > 0 && (
                           <span className="inline-flex items-center rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-medium text-rose-600 border border-rose-200">
                             ↻ carried {task.carryCount}×
+                          </span>
+                        )}
+                        {task.managerScore != null && (
+                          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 border border-amber-200">
+                            🏅 {task.managerScore}%
                           </span>
                         )}
                       </div>

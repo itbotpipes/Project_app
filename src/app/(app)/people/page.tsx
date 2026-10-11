@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser } from "@/lib/auth";
+import { getCurrentUser, canScoreCompanyWide, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { fetchAllRoles, fetchAllDepartments } from "@/lib/cache";
 import DirectoryView, { type DirectoryEmployee } from "./DirectoryView";
@@ -11,6 +11,9 @@ export default async function PeoplePage({
 }) {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
+
+  const isCompanyWideScorer = canScoreCompanyWide(user);
+  const isManager = isManagerLike(user.systemRole);
 
   const sp = await searchParams;
   const rawMonth = sp.month || sp.date;
@@ -116,6 +119,8 @@ export default async function PeoplePage({
       increment = { pct: 0, label: "— No History", tier: "NONE", tone: "bg-slate-50 text-slate-400 border-slate-200" };
     }
 
+    const canScore = isCompanyWideScorer || (isManager && mgrIds.includes(user.id));
+
     return {
       id: empId,
       name: data.name || "Unknown",
@@ -129,6 +134,7 @@ export default async function PeoplePage({
       avg6Months,
       monthsCount6Mo: last6.length,
       increment,
+      canScore,
     };
   });
 

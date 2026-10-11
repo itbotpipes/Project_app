@@ -67,7 +67,7 @@ export default async function AppLayout({
               <NotificationBell alerts={alerts} />
               <div className="text-right leading-tight">
                 <div className="text-sm font-medium">{user.name}</div>
-                <div className="text-[11px] text-slate-500">{user.role.title}</div>
+                <div className="text-[11px] text-slate-500">{user.role?.title ?? user.systemRole ?? "Team Member"}</div>
               </div>
               <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700">
                 {initials}

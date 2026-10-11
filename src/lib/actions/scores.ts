@@ -124,6 +124,7 @@ export async function saveMonthlyScorecard(formData: FormData) {
   revalidatePath("/scores");
   revalidatePath("/team");
   revalidatePath("/performance");
+  revalidatePath("/people");
   revalidatePath("/");
   return { ok: true };
 }
@@ -156,6 +157,7 @@ export async function saveYearlyReview(formData: FormData) {
 
   revalidatePath("/scores");
   revalidatePath("/performance");
+  revalidatePath("/people");
   return { ok: true };
 }
 
@@ -200,5 +202,139 @@ export async function saveBehaviourReview(formData: FormData) {
 
   revalidatePath("/scores");
   revalidatePath("/performance");
+  revalidatePath("/people");
   return { ok: true };
+}
+
+export async function getEmployeeScoringData(employeeId: string, year: number, month: number) {
+  const user = await getCurrentUser();
+  if (!user) return { error: "Not signed in" };
+  if (!(await canScoreForUser(user, employeeId))) return { error: "Not authorized to score this employee" };
+
+  const employeeDoc = await adminDb.collection("Employee").doc(employeeId).get();
+  if (!employeeDoc.exists) return { error: "Employee not found" };
+  const employeeData = employeeDoc.data()!;
+
+  let roleTitle = "Team Member";
+  let departmentName = "General";
+  if (employeeData.roleId) {
+    const roleDoc = await adminDb.collection("Role").doc(employeeData.roleId).get();
+    if (roleDoc.exists) {
+      const rData = roleDoc.data()!;
+      roleTitle = rData.title || "Team Member";
+      if (rData.departmentId) {
+        const deptDoc = await adminDb.collection("Department").doc(rData.departmentId).get();
+        if (deptDoc.exists) departmentName = deptDoc.data()!.name || "General";
+      }
+    }
+  }
+
+  // Fetch KPIs for employee's role
+  let kpis: any[] = [];
+  if (employeeData.roleId) {
+    const kpisSnap = await adminDb.collection("KpiTemplate").where("roleId", "==", employeeData.roleId).get();
+    kpis = kpisSnap.docs ? kpisSnap.docs.map((d: any) => ({ id: d.id, ...d.data() })) : [];
+    kpis.sort((a: any, b: any) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  }
+
+  // Date bounds for month
+  const monthStart = new Date(year, month - 1, 1);
+  const monthEnd = new Date(year, month, 1);
+  const monthStartMs = monthStart.getTime();
+  const monthEndMs = monthEnd.getTime();
+
+  // Fetch tasks
+  const tasksSnap = await adminDb.collection("Task").where("assigneeId", "==", employeeId).get();
+  const tasks = tasksSnap.docs
+    .filter((d: any) => {
+      const t = d.data();
+      if (t.deletedAt) return false;
+      const raw = t.createdAt;
+      const createdAt = raw?.toDate ? raw.toDate() : new Date(raw ?? 0);
+      return createdAt.getTime() >= monthStartMs && createdAt.getTime() < monthEndMs;
+    })
+    .map((d: any) => {
+      const t = d.data();
+      return {
+        kpiTemplateId: t.kpiTemplateId,
+        status: t.status,
+        createdAt: t.createdAt?.toDate ? t.createdAt.toDate() : new Date(t.createdAt),
+        completedAt: t.completedAt ? (t.completedAt?.toDate ? t.completedAt.toDate() : new Date(t.completedAt)) : null,
+        carryCount: t.carryCount ?? 0,
+      };
+    });
+
+  const auto = computeAutoScores(
+    kpis.map((k: any) => ({ id: k.id, weightage: k.weightage })),
+    tasks
+  );
+
+  // Fetch existing MonthlyScores
+  const scoresSnap = await adminDb.collection("MonthlyScore")
+    .where("employeeId", "==", employeeId)
+    .where("year", "==", year)
+    .where("month", "==", month)
+    .get();
+
+  const scoreMap = new Map<string, number>();
+  scoresSnap.docs?.forEach((d: any) => {
+    const data = d.data();
+    if (data.kpiTemplateId) scoreMap.set(data.kpiTemplateId, data.score);
+  });
+
+  const rows = kpis.map((k: any) => {
+    const existing = scoreMap.has(k.id) ? scoreMap.get(k.id)! : null;
+    const a = auto.get(k.id);
+    return {
+      id: k.id,
+      name: k.kpiName,
+      kra: k.kraName || "",
+      weightage: k.weightage,
+      auto: a?.auto ?? 0,
+      tasks: a?.total ?? 0,
+      current: existing,
+      saved: existing != null,
+    };
+  });
+
+  // Fetch BehaviourReview
+  const behaviourSnap = await adminDb.collection("BehaviourReview")
+    .where("employeeId", "==", employeeId)
+    .where("year", "==", year)
+    .where("month", "==", month)
+    .limit(1)
+    .get();
+  const bh = !behaviourSnap.empty ? behaviourSnap.docs[0].data() : null;
+
+  // Fetch YearlyReview
+  const reviewSnap = await adminDb.collection("YearlyReview")
+    .where("employeeId", "==", employeeId)
+    .where("year", "==", year)
+    .limit(1)
+    .get();
+  const review = !reviewSnap.empty ? reviewSnap.docs[0].data() : null;
+
+  return {
+    employee: {
+      id: employeeId,
+      name: employeeData.name || "Employee",
+      roleTitle,
+      departmentName,
+    },
+    year,
+    month,
+    rows,
+    behaviour: bh
+      ? {
+          attendance: bh.attendance ?? 0,
+          punctuality: bh.punctuality ?? 0,
+          learning: bh.learning ?? 0,
+          helpfulness: bh.helpfulness ?? 0,
+          trust: bh.trust ?? 0,
+          conduct: bh.conduct ?? 0,
+          note: bh.note ?? null,
+        }
+      : null,
+    targetAchievedPct: review?.targetAchievedPct ?? null,
+  };
 }

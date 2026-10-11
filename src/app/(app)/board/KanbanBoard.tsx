@@ -28,6 +28,7 @@ export type BoardTask = {
   delegatedBy: string | null;
   checklistTotal?: number;
   checklistDone?: number;
+  managerScore?: number | null;
 };
 
 const COLUMN_TINT: Record<string, string> = {
@@ -278,6 +279,11 @@ export default function KanbanBoard({
                     )}
                     {task.reviewRequired && (
                       <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">review</span>
+                    )}
+                    {task.managerScore != null && (
+                      <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800" title={`Quality score: ${task.managerScore}%`}>
+                        🏅 {task.managerScore}%
+                      </span>
                     )}
                     {task.carryCount > 0 && (
                       <span className="rounded-full bg-red-50 px-2 py-0.5 text-xs font-medium text-red-600">

@@ -25,7 +25,9 @@ import {
   Info,
   SlidersHorizontal,
   X,
+  Flame,
 } from "lucide-react";
+import { cn } from "@/lib/cn";
 import Avatar from "../../_components/Avatar";
 import TaskLink from "../../_components/TaskLink";
 import type { EmployeeTaskReportData, TaskReportItem, KpiUsageDetail } from "@/lib/taskReportService";
@@ -68,6 +70,8 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
 
   // KPI drilldown accordion state
   const [expandedKpiId, setExpandedKpiId] = useState<string | null>(kpiUsage[0]?.kpiId || null);
+  const maxKpiTasks = useMemo(() => Math.max(1, ...kpiUsage.map((k) => k.totalTasks)), [kpiUsage]);
+  const selectedKpi = useMemo(() => kpiUsage.find((k) => k.kpiId === expandedKpiId) || null, [kpiUsage, expandedKpiId]);
 
   // Detailed task table search & filters
   const [searchQuery, setSearchQuery] = useState("");
@@ -474,7 +478,279 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
           )}
         </div>
 
-        {/* KPI Usage Bars List */}
+        {/* ── KPI Usage Fire-Pipes & Water Buckets UI ────────────────────── */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between text-xs text-slate-500">
+            <span>Each bucket represents an operational KPI. Water level indicates task volume relative to peak focus.</span>
+            <span className="hidden sm:inline-block text-[11px] text-slate-400">Click a bucket to inspect tasks</span>
+          </div>
+
+          {/* Buckets Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3.5">
+            {kpiUsage.map((kpi) => {
+              const isSelected = expandedKpiId === kpi.kpiId;
+              const fillPct = kpi.totalTasks > 0 ? Math.max(12, Math.round((kpi.totalTasks / maxKpiTasks) * 100)) : 0;
+              const isTopFocus = mostUsedKpi?.kpiId === kpi.kpiId;
+
+              return (
+                <div
+                  key={kpi.kpiId}
+                  onClick={() => setExpandedKpiId(isSelected ? null : kpi.kpiId)}
+                  className={cn(
+                    "group relative flex flex-col justify-between rounded-2xl border bg-white p-3.5 transition-all duration-300 cursor-pointer select-none",
+                    isSelected
+                      ? "border-blue-500 bg-gradient-to-b from-blue-50/40 via-white to-white shadow-md ring-2 ring-blue-400/40"
+                      : "border-slate-200/90 hover:border-slate-300 hover:shadow-md hover:bg-slate-50/30"
+                  )}
+                >
+                  {/* Top badges */}
+                  <div className="flex items-center justify-between gap-1 mb-2">
+                    {isTopFocus ? (
+                      <span className="inline-flex items-center gap-1 rounded-md bg-violet-100 px-1.5 py-0.5 text-[10px] font-bold text-violet-800">
+                        <Flame size={10} className="fill-violet-600 text-violet-600" />
+                        Top
+                      </span>
+                    ) : (
+                      <span className="text-[10px] font-semibold text-slate-400 uppercase tracking-wider">
+                        Bucket
+                      </span>
+                    )}
+
+                    <span className="rounded-md bg-blue-50 border border-blue-100/80 px-1.5 py-0.5 text-[10px] font-bold text-blue-700">
+                      {kpi.usagePct}% of work
+                    </span>
+                  </div>
+
+                  {/* Physical Fire GI Pipe Water Bucket */}
+                  <div className="py-2 flex justify-center">
+                    <div className="relative" style={{ height: 130, width: 52 }}>
+                      {/* top coupling / flange */}
+                      <div
+                        className="absolute -top-1 left-1/2 z-20 h-2.5 -translate-x-1/2 rounded-[3px] bg-gradient-to-r from-red-700 via-red-500 to-red-800 shadow-[0_1px_3px_rgba(0,0,0,0.3)] border border-red-900/30"
+                        style={{ width: 58 }}
+                      />
+                      {/* bottom coupling / flange */}
+                      <div
+                        className="absolute -bottom-1 left-1/2 z-20 h-2.5 -translate-x-1/2 rounded-[3px] bg-gradient-to-r from-red-800 via-red-600 to-red-900 shadow-[0_1px_3px_rgba(0,0,0,0.3)] border border-red-950/30"
+                        style={{ width: 58 }}
+                      />
+
+                      {/* pipe body: red rim, transparent glassy window */}
+                      <div
+                        className={cn(
+                          "absolute inset-0 z-10 overflow-hidden rounded-[10px] border-[3px] bg-gradient-to-r from-slate-50/15 via-white/5 to-slate-100/15 backdrop-blur-[2px] shadow-[inset_0_2px_8px_rgba(0,0,0,0.2)] transition-all duration-300",
+                          isSelected
+                            ? "border-red-600 ring-2 ring-amber-400 ring-offset-1 shadow-[0_0_12px_rgba(239,68,68,0.5),inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                            : "border-red-600/85 ring-1 ring-red-800/20 shadow-[0_2px_6px_rgba(0,0,0,0.05),inset_0_2px_8px_rgba(0,0,0,0.2)] group-hover:border-red-600 group-hover:shadow-[0_4px_10px_rgba(239,68,68,0.25),inset_0_2px_8px_rgba(0,0,0,0.2)]"
+                        )}
+                        style={{ height: 130, width: 52 }}
+                      >
+                        {/* calibration ticks */}
+                        <div className="absolute inset-y-2 left-1 z-25 flex flex-col justify-between w-1 opacity-40 pointer-events-none">
+                          <div className="h-[1px] w-full bg-red-600" />
+                          <div className="h-[1px] w-2/3 bg-red-600" />
+                          <div className="h-[1px] w-full bg-red-600" />
+                          <div className="h-[1px] w-2/3 bg-red-600" />
+                          <div className="h-[1px] w-full bg-red-600" />
+                        </div>
+                        <div className="absolute inset-y-2 right-1 z-25 flex flex-col justify-between w-1 opacity-40 pointer-events-none">
+                          <div className="h-[1px] w-full bg-red-600" />
+                          <div className="h-[1px] w-2/3 bg-red-600" />
+                          <div className="h-[1px] w-full bg-red-600" />
+                          <div className="h-[1px] w-2/3 bg-red-600" />
+                          <div className="h-[1px] w-full bg-red-600" />
+                        </div>
+
+                        {/* water column */}
+                        <div
+                          className={cn("absolute inset-x-0 bottom-0", kpi.totalTasks > 0 && "animate-waterBob")}
+                          style={{ height: `${fillPct}%`, transition: "height 700ms cubic-bezier(0.22,1,0.36,1)" }}
+                        >
+                          <div
+                            className={cn(
+                              "absolute inset-0 transition-all duration-300",
+                              kpi.totalTasks === 0
+                                ? "bg-slate-200/10"
+                                : "bg-gradient-to-t from-sky-600 via-sky-500 to-cyan-400 shadow-[inset_0_0_8px_rgba(14,165,233,0.5)]"
+                            )}
+                          />
+                          {kpi.totalTasks > 0 && (
+                            <>
+                              <div className="absolute -top-1 left-0 h-2 w-[200%] animate-waterWave bg-gradient-to-r from-cyan-200/0 via-cyan-100/80 to-cyan-200/0" />
+                              <div className="absolute top-0 inset-x-0 h-[3px] bg-cyan-200/80" />
+                              <span className="animate-bubble absolute bottom-1 left-[25%] h-1.5 w-1.5 rounded-full bg-white/70" style={{ animationDelay: "0s" }} />
+                              <span className="animate-bubble absolute bottom-2 left-[55%] h-1 w-1 rounded-full bg-white/60" style={{ animationDelay: "0.9s" }} />
+                              <span className="animate-bubble absolute bottom-1 left-[70%] h-1.5 w-1.5 rounded-full bg-white/60" style={{ animationDelay: "1.6s" }} />
+                            </>
+                          )}
+                        </div>
+
+                        {/* glossy highlight */}
+                        <div className="animate-pipeSheen pointer-events-none absolute inset-y-2 left-1 w-1 rounded-full bg-white/50" />
+                        <div className="pointer-events-none absolute inset-y-0 right-0 w-2 bg-gradient-to-l from-red-900/15 to-transparent z-15" />
+
+                        {/* count badge */}
+                        <div className="absolute inset-0 grid place-items-center z-30 pointer-events-none">
+                          <span
+                            className={cn(
+                              "flex items-center justify-center rounded-full font-bold tabular-nums border transition-all duration-300 shadow-sm h-7 w-7 text-xs",
+                              kpi.totalTasks === 0
+                                ? "bg-slate-100/90 border-slate-300 text-slate-500"
+                                : "bg-white/95 border-cyan-200 text-cyan-900 shadow-cyan-100/50"
+                            )}
+                          >
+                            {kpi.totalTasks}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Bucket Name & summary */}
+                  <div className="text-center mt-1">
+                    <h3
+                      className="font-bold text-xs text-slate-900 line-clamp-2 min-h-[32px] flex items-center justify-center leading-snug"
+                      title={kpi.kpiName}
+                    >
+                      {kpi.kpiName}
+                    </h3>
+                    <p className="text-[11px] font-semibold text-slate-500 mt-0.5">
+                      {kpi.totalTasks} task{kpi.totalTasks === 1 ? "" : "s"}
+                    </p>
+                  </div>
+
+                  {/* Metrics box */}
+                  <div className="mt-2.5 rounded-xl bg-slate-50 border border-slate-100/80 p-2 space-y-1 text-[11px]">
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">Closed</span>
+                      <span className="font-bold text-emerald-700">
+                        {kpi.completedTasks}{" "}
+                        <span className="text-[10px] font-normal text-slate-400">({kpi.completionRate}%)</span>
+                      </span>
+                    </div>
+
+                    <div className="flex justify-between items-center">
+                      <span className="text-slate-500">On-time</span>
+                      <span className="font-bold text-blue-700">
+                        {kpi.onTimeRate}%{" "}
+                        <span className="text-[10px] font-normal text-slate-400">({kpi.onTimeTasks})</span>
+                      </span>
+                    </div>
+
+                    {kpi.reworkTasks > 0 && (
+                      <div className="flex justify-between items-center pt-0.5 text-red-600">
+                        <span className="text-slate-500">Rework</span>
+                        <span className="rounded-full bg-red-100 px-1.5 py-0.2 text-[10px] font-bold text-red-700">
+                          {kpi.reworkTasks}×
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Expand button footer */}
+                  <div className="mt-2.5 pt-1.5 border-t border-slate-100 flex items-center justify-center gap-1 text-[11px] font-semibold text-blue-600 group-hover:text-blue-700">
+                    <span>{isSelected ? "Hide tasks" : "View tasks"}</span>
+                    {isSelected ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Expanded Selected Bucket Inspection Drawer */}
+          {selectedKpi && (
+            <div className="rounded-2xl border-2 border-blue-200/90 bg-white p-4 shadow-sm space-y-3 transition-all duration-300">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 pb-3">
+                <div className="flex items-center gap-2">
+                  <span className="h-2.5 w-2.5 rounded-full bg-blue-600 inline-block animate-pulse" />
+                  <h3 className="font-bold text-sm text-slate-900">
+                    Tasks in bucket: <span className="text-blue-700">{selectedKpi.kpiName}</span>
+                  </h3>
+                  <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-bold text-blue-800">
+                    {selectedKpi.tasks.length} task{selectedKpi.tasks.length === 1 ? "" : "s"}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="rounded-md bg-emerald-50 border border-emerald-200 px-2 py-0.5 font-semibold text-emerald-800">
+                    {selectedKpi.completedTasks} closed ({selectedKpi.completionRate}%)
+                  </span>
+                  <span className="rounded-md bg-blue-50 border border-blue-200 px-2 py-0.5 font-semibold text-blue-700">
+                    {selectedKpi.onTimeRate}% on-time
+                  </span>
+                  <span className="rounded-md bg-slate-100 px-2 py-0.5 font-semibold text-slate-700">
+                    {selectedKpi.usagePct}% of work
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => setExpandedKpiId(null)}
+                    className="ml-2 rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-700 transition"
+                    title="Close tasks list"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+
+              <div className="divide-y divide-slate-100 rounded-xl border border-slate-200 overflow-hidden bg-slate-50/30">
+                {selectedKpi.tasks.length === 0 ? (
+                  <div className="p-4 text-center text-xs text-slate-400">
+                    No tasks found in this bucket for this period.
+                  </div>
+                ) : (
+                  selectedKpi.tasks.map((task) => (
+                    <div key={task.id} className="flex items-center justify-between p-3 hover:bg-white transition text-xs">
+                      <div className="min-w-0 flex-1 pr-3">
+                        <TaskLink taskId={task.id} className="font-semibold text-slate-900 hover:text-blue-600 hover:underline">
+                          {task.title}
+                        </TaskLink>
+                        <div className="flex items-center gap-2 text-[11px] text-slate-500 mt-1">
+                          <span className="rounded bg-slate-200/70 px-1.5 py-0.2 font-medium">Priority: {task.priority}</span>
+                          {task.dueAt && <span>• Due: {formatDisplayDate(task.dueAt)}</span>}
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span
+                          className={`rounded-full px-2.5 py-0.5 text-[10px] font-bold ${
+                            task.status === "CLOSED"
+                              ? "bg-emerald-100 text-emerald-800"
+                              : task.status === "REOPENED"
+                              ? "bg-red-100 text-red-800"
+                              : "bg-blue-100 text-blue-800"
+                          }`}
+                        >
+                          {task.status.replace("_", " ")}
+                        </span>
+
+                        {task.isOnTime === true && (
+                          <span className="text-emerald-600 font-semibold text-[11px] flex items-center gap-0.5">
+                            <CheckCircle2 size={12} /> On-time
+                          </span>
+                        )}
+                        {task.isOnTime === false && (
+                          <span className="text-red-600 font-semibold text-[11px] flex items-center gap-0.5">
+                            <AlertTriangle size={12} /> Late
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          )}
+
+          {kpiUsage.length === 0 && (
+            <div className="rounded-xl border border-dashed border-slate-200 p-8 text-center text-xs text-slate-400">
+              No KPI tasks were assigned or worked during this period.
+            </div>
+          )}
+        </div>
+
+        {/* ── PREVIOUS KPI LIST CODE (KEPT COMMENTED AS REQUESTED) ────────── */}
+        {/*
         <div className="space-y-3">
           {kpiUsage.map((kpi) => {
             const isExpanded = expandedKpiId === kpi.kpiId;
@@ -484,7 +760,6 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
                 key={kpi.kpiId}
                 className="rounded-xl border border-slate-200 bg-slate-50/50 hover:bg-slate-50 transition overflow-hidden"
               >
-                {/* Header row */}
                 <div
                   onClick={() => setExpandedKpiId(isExpanded ? null : kpi.kpiId)}
                   className="flex cursor-pointer flex-wrap items-center justify-between gap-3 p-3.5 select-none"
@@ -498,7 +773,6 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
                       <span className="text-xs font-semibold text-slate-500">({kpi.usagePct}% of work)</span>
                     </div>
 
-                    {/* Horizontal usage bar */}
                     <div className="mt-2 h-2 w-full overflow-hidden rounded-full bg-slate-200">
                       <div
                         className="h-full rounded-full bg-blue-600 transition-all duration-500"
@@ -507,7 +781,6 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
                     </div>
                   </div>
 
-                  {/* Summary badges for KPI */}
                   <div className="flex items-center gap-3 text-xs">
                     <div className="text-right">
                       <span className="font-semibold text-emerald-700">{kpi.completedTasks} closed</span>
@@ -531,7 +804,6 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
                   </div>
                 </div>
 
-                {/* Expanded KPI Task List */}
                 {isExpanded && (
                   <div className="border-t border-slate-200 bg-white p-3 space-y-2">
                     <div className="text-[11px] font-semibold uppercase tracking-wider text-slate-400">
@@ -589,6 +861,7 @@ export default function TaskReportView({ data }: { data: EmployeeTaskReportData 
             </div>
           )}
         </div>
+        */}
       </div>
 
       {/* ── 6. Delivery Quality & Status Breakdown ─────────────────────────── */}

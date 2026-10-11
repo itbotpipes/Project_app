@@ -580,23 +580,39 @@ export default function SimplifiedPerformanceView({
                       {/* Dynamic Component Factor Breakdown */}
                       {meta?.components?.length ? (
                         <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-                          {meta.components.map((comp) => (
-                            <div key={comp.key} className="rounded-lg bg-white p-2.5 border border-slate-200">
-                              <div className="flex items-center justify-between">
-                                <span className="text-[11px] font-semibold text-slate-700">{comp.label}</span>
-                                <span className="text-[10px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
-                                  {comp.weightPct}% weight
-                                </span>
+                          {meta.components.map((comp) => {
+                            const maxFactorPts = comp.maxPoints ?? Math.round(bucket.weightage * (comp.weight || comp.weightPct / 100) * 10) / 10;
+
+                            return (
+                              <div key={comp.key} className="rounded-lg bg-white p-2.5 border border-slate-200">
+                                <div className="flex items-center justify-between">
+                                  <span className="text-[11px] font-semibold text-slate-700">{comp.label}</span>
+                                  <span className="text-[10px] font-medium text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded">
+                                    {comp.weightPct}% weight
+                                  </span>
+                                </div>
+                                <div className="mt-1 flex items-baseline justify-between">
+                                  <span className="text-sm font-bold text-slate-900">{comp.ratePct}%</span>
+                                  <div className="text-right">
+                                    <span className="text-[11px] font-bold text-violet-700">
+                                      {comp.contributionPoints.toFixed(1)}
+                                    </span>
+                                    <span className="text-[10px] font-medium text-slate-400">
+                                      {" "}/ {maxFactorPts.toFixed(1)} pts
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="mt-1 flex items-center justify-between text-[10px] text-slate-500">
+                                  <span className="truncate" title={comp.rawMetric}>
+                                    {comp.rawMetric}
+                                  </span>
+                                  <span className="shrink-0 text-slate-400 text-[9px] font-medium pl-1">
+                                    ({comp.ratePct}% of {maxFactorPts.toFixed(1)})
+                                  </span>
+                                </div>
                               </div>
-                              <div className="mt-1 flex items-baseline justify-between">
-                                <span className="text-sm font-bold text-slate-900">{comp.ratePct}%</span>
-                                <span className="text-[11px] font-semibold text-violet-700">{comp.contributionPoints.toFixed(1)} pts</span>
-                              </div>
-                              <p className="mt-1 text-[10px] text-slate-500 truncate" title={comp.rawMetric}>
-                                {comp.rawMetric}
-                              </p>
-                            </div>
-                          ))}
+                            );
+                          })}
                         </div>
                       ) : null}
 
@@ -628,17 +644,24 @@ export default function SimplifiedPerformanceView({
                                   {/* Dynamic Task Component Breakdown */}
                                   {tMeta?.components?.length ? (
                                     <div className="flex flex-wrap gap-1.5 text-[10px]">
-                                      {tMeta.components.map((tc) => (
-                                        <span
-                                          key={tc.key}
-                                          className="inline-flex items-center gap-1 rounded bg-slate-50 px-2 py-0.5 border border-slate-200 text-slate-600"
-                                          title={tc.description}
-                                        >
-                                          <span className="font-medium text-slate-700">{tc.label} ({tc.weightPct}%):</span>
-                                          <span className="font-semibold text-slate-900">{tc.contributionPoints.toFixed(1)} pts</span>
-                                          <span className="text-slate-400">({tc.rawMetric})</span>
-                                        </span>
-                                      ))}
+                                      {tMeta.components.map((tc) => {
+                                        const tcMax = tc.maxPoints ?? Math.round((t.pointsResult.maxPoints || 1.0) * (tc.weight || tc.weightPct / 100) * 10) / 10;
+
+                                        return (
+                                          <span
+                                            key={tc.key}
+                                            className="inline-flex items-center gap-1 rounded bg-slate-50 px-2 py-0.5 border border-slate-200 text-slate-600"
+                                            title={tc.description}
+                                          >
+                                            <span className="font-medium text-slate-700">{tc.label} ({tc.weightPct}%):</span>
+                                            <span className="font-bold text-violet-700">
+                                              {tc.contributionPoints.toFixed(1)}
+                                              <span className="font-normal text-slate-400"> / {tcMax.toFixed(1)} pts</span>
+                                            </span>
+                                            <span className="text-slate-400">({tc.rawMetric})</span>
+                                          </span>
+                                        );
+                                      })}
                                     </div>
                                   ) : null}
                                 </div>

@@ -75,7 +75,7 @@ export default async function ScoresPage({
     e.reportsToName = mgrNames.length > 0 ? mgrNames.join(", ") : "—";
   });
   
-  employees.sort((a: any, b: any) => (a.role.level ?? 99) - (b.role.level ?? 99) || a.name.localeCompare(b.name));
+  employees.sort((a: any, b: any) => (a.role?.level ?? 99) - (b.role?.level ?? 99) || a.name.localeCompare(b.name));
   
   const empIds = employees.map((e) => e.id);
   // Batch query to handle "in" clauses (max 30 elements)
@@ -156,7 +156,7 @@ export default async function ScoresPage({
 
   const byDept = new Map<string, typeof employees>();
   for (const e of employees) {
-    const d = e.role.department?.name ?? "Other";
+    const d = e.role?.department?.name ?? "Other";
     const arr = byDept.get(d) ?? [];
     arr.push(e);
     byDept.set(d, arr);
@@ -233,7 +233,7 @@ export default async function ScoresPage({
                     </div>
                     <div className="min-w-[9rem]">
                       <div className="text-sm font-semibold text-slate-800">{e.name}</div>
-                      <div className="text-xs text-slate-500">{e.role.title}</div>
+                      <div className="text-xs text-slate-500">{e.role?.title ?? "Member"}</div>
                     </div>
                     <div className="min-w-[10rem]">
                       <span className="text-[10px] text-slate-400 block uppercase tracking-wider font-bold">Reports To</span>
@@ -268,7 +268,7 @@ export default async function ScoresPage({
                           {e.name}
                         </Link>
                       </div>
-                      <div className="text-xs text-slate-500">{e.role.title}</div>
+                      <div className="text-xs text-slate-500">{e.role?.title ?? "Member"}</div>
                       <div className="text-[10px] text-slate-400">Reports to: {e.reportsToName}</div>
                     </div>
                     <div className="ml-auto flex items-center gap-2">

@@ -25,6 +25,7 @@ export default function KpiScoreEditor({
   rows,
   behaviour,
   targetAchievedPct,
+  onSaved,
 }: {
   employeeId: string;
   employeeName: string;
@@ -33,6 +34,7 @@ export default function KpiScoreEditor({
   rows: Row[];
   behaviour: BehaviourInput | null;
   targetAchievedPct: number | null;
+  onSaved?: (newTotal: number) => void;
 }) {
   const [beh, setBeh] = useState<Record<BehaviourKey, string>>(
     Object.fromEntries(
@@ -65,7 +67,12 @@ export default function KpiScoreEditor({
       <form
         action={async (fd) => {
           const res = await saveMonthlyScorecard(fd);
-          setSavedMsg(res?.error ? res.error : "✓ Saved & reflected to employee");
+          if (res?.error) {
+            setSavedMsg(res.error);
+          } else {
+            setSavedMsg("✓ Saved & reflected to employee");
+            onSaved?.(finalTotal);
+          }
           setTimeout(() => setSavedMsg(null), 2500);
         }}
       >

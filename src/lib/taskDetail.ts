@@ -174,6 +174,16 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
   const isWatching = watchers.some((w: any) => w.employee.id === viewer.id);
   const canDelete = task.creatorId === viewer.id || task.assigneeId === viewer.id || isManagerLike(viewer.systemRole);
 
+  const isManager = isManagerLike(viewer.systemRole);
+  const isDirectReviewer = task.reviewerId === viewer.id;
+  const isAssigneeManager = Boolean(
+    (Array.isArray(assignee?.reportsToIds) && assignee.reportsToIds.includes(viewer.id)) ||
+    assignee?.reportsToId === viewer.id
+  );
+  const isReviewNeeded = Boolean(task.reviewRequired && (isDirectReviewer || isAssigneeManager || isManager));
+  const inLoop = isWatching;
+  const canScore = isManager && (inLoop || isReviewNeeded);
+
   const kpiPoints = kpiData ? calculateIndividualTaskPoints({
     id: task.id,
     title: task.title,
@@ -190,6 +200,7 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     dueAt: toDate(task.dueAt),
     checklistTotal: checklistItems.length,
     checklistDone: checklistItems.filter((c: any) => c.done).length,
+    managerScore: task.managerScore ?? null,
   }, kpiData.weightage ?? 20, 5.0, kpiData.kpiName) : null;
 
   return {
@@ -232,5 +243,13 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     activity,
     lastStatusChange: toISOSafe(task.lastStatusChange) || toISOSafe(task.createdAt),
     statusDurations: (task.statusDurations || {}) as Record<string, number>,
+    managerScore: typeof task.managerScore === "number" ? task.managerScore : null,
+    scoreFeedback: task.scoreFeedback ?? null,
+    scoredAt: toISOSafe(task.scoredAt),
+    scoredById: task.scoredById ?? null,
+    scoredByName: task.scoredByName ?? null,
+    canScore,
+    inLoop,
+    isReviewNeeded,
   };
 }
