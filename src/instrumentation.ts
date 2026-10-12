@@ -26,7 +26,7 @@ export async function register() {
       const runDailyJobs = jobsModule.runDailyJobs || (jobsModule as any).default?.runDailyJobs;
       if (typeof runDailyJobs === "function") {
         const result = await runDailyJobs();
-        console.log(`[scheduler] daily jobs ran: ${result.carried} task(s) carried forward`);
+        console.log(`[scheduler] daily jobs ran: ${result.carried} task(s) carried forward, ${result.cleanedLogs ?? 0} old activity log(s) cleaned`);
       } else {
         console.error("[scheduler] runDailyJobs export not found in dailyJobs module");
       }

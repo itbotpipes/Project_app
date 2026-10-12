@@ -190,8 +190,37 @@ export async function ensureMonthlyAutoScorecards(): Promise<number> {
   return created;
 }
 
-export async function runDailyJobs(): Promise<{ carried: number; scorecards: number; ranAt: string }> {
+export async function cleanupOldAuditLogs(days = 30): Promise<number> {
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  let totalDeleted = 0;
+
+  try {
+    while (true) {
+      const snap = await adminDb
+        .collection("AuditLog")
+        .where("createdAt", "<", cutoff)
+        .limit(500)
+        .get();
+
+      if (snap.empty) break;
+
+      const batch = adminDb.batch();
+      snap.docs.forEach((d) => batch.delete(d.ref));
+      await batch.commit();
+
+      totalDeleted += snap.size;
+      if (snap.size < 500) break;
+    }
+  } catch (err) {
+    console.error("[cleanupOldAuditLogs] Error cleaning old audit logs:", err);
+  }
+
+  return totalDeleted;
+}
+
+export async function runDailyJobs(): Promise<{ carried: number; scorecards: number; cleanedLogs: number; ranAt: string }> {
   const carried = await carryForwardOpenTasks();
   const scorecards = new Date().getDate() <= 7 ? await ensureMonthlyAutoScorecards() : 0;
-  return { carried, scorecards, ranAt: new Date().toISOString() };
+  const cleanedLogs = await cleanupOldAuditLogs(30);
+  return { carried, scorecards, cleanedLogs, ranAt: new Date().toISOString() };
 }

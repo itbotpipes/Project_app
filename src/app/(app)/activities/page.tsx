@@ -24,7 +24,14 @@ export default async function ActivitiesPage() {
   }
 
   // 2. Extract referenced Actor IDs, Task IDs, and Department references
-  const rawDocs = logsSnap.docs || [];
+  // Activities retention window: only display logs within the last 30 days (1 month)
+  const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+  const rawDocs = (logsSnap.docs || []).filter((d) => {
+    const created = d.data().createdAt?.toDate
+      ? d.data().createdAt.toDate()
+      : new Date(d.data().createdAt || Date.now());
+    return created >= oneMonthAgo;
+  });
   const actorIds = new Set<string>();
   const taskIds = new Set<string>();
 
