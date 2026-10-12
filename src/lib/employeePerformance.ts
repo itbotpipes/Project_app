@@ -169,7 +169,26 @@ export async function loadEmployeePerformance(employeeId: string) {
     if (!d.data().deletedAt) rawDocsMap.set(d.id, { id: d.id, ...d.data() });
   }
 
-  const allRawTasks = Array.from(rawDocsMap.values()).map((data) => {
+  const rawTasksList = Array.from(rawDocsMap.values());
+  const missingKpiIds = rawTasksList
+    .map((d) => d.kpiTemplateId)
+    .filter((id): id is string => Boolean(id) && !kpiMap.has(id));
+
+  if (missingKpiIds.length > 0) {
+    const extraKpisMap = await batchFetchByIds('KpiTemplate', Array.from(new Set(missingKpiIds)), adminDb);
+    for (const [id, extraKpi] of extraKpisMap.entries()) {
+      if (extraKpi && !kpiMap.has(id)) {
+        const fullKpi = { id, ...(extraKpi as any) };
+        kpiMap.set(id, fullKpi);
+        kpis.push(fullKpi);
+        if (fullKpi.kraName) {
+          kraMap.set(fullKpi.kraName, (kraMap.get(fullKpi.kraName) ?? 0) + (fullKpi.weightage ?? 0));
+        }
+      }
+    }
+  }
+
+  const allRawTasks = rawTasksList.map((data) => {
     const createdAt = toDate(data.createdAt);
     const completedAt = toDate(data.completedAt);
     const dueAt = toDate(data.dueAt);

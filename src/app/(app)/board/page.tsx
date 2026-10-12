@@ -61,7 +61,17 @@ export default async function BoardPage({
           isPrimary: d.data().isPrimary ?? true,
         }))
     : [];
-  const kpiOptions = allKpis.filter(k => k.roleId === user.roleId);
+  let kpiOptions = allKpis.filter(k => k.roleId === user.roleId);
+  if (kpiOptions.length === 0 && user.role?.title) {
+    const rolesSnap = await fetchAllRoles(adminDb);
+    const roleTitleMap = new Map<string, string>();
+    rolesSnap.docs?.forEach((d: any) => roleTitleMap.set(d.id, (d.data().title || "").toLowerCase().trim()));
+    const userRoleTitle = (user.role.title || "").toLowerCase().trim();
+    kpiOptions = allKpis.filter(k => {
+      const templateRoleTitle = roleTitleMap.get(k.roleId);
+      return templateRoleTitle && (templateRoleTitle === userRoleTitle || templateRoleTitle.includes(userRoleTitle) || userRoleTitle.includes(templateRoleTitle));
+    });
+  }
 
   // Active board tasks from the open/active tasks snap.
   // We can also merge recently closed tasks from monthTasksSnap if we want them on the board,
