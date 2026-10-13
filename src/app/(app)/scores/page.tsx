@@ -137,7 +137,27 @@ export default async function ScoresPage({
     });
     reviewsSnap.docs?.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
     behaviourSnap.docs?.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
-    targetsSnap.docs?.forEach((d: any) => targets.push({ id: d.id, ...d.data() }));
+    targetsSnap.docs?.forEach((d: any) => {
+      const tg = d.data();
+      targets.push({
+        id: d.id,
+        title: tg.title ?? "Untitled",
+        description: tg.description ?? null,
+        employeeId: tg.employeeId,
+        periodType: tg.periodType ?? "month",
+        targetType: tg.targetType ?? "NUMERIC",
+        metricUnit: tg.metricUnit ?? "",
+        targetValue: tg.targetValue ?? 1,
+        currentValue: tg.currentValue ?? 0,
+        weightagePct: tg.weightagePct ?? 20,
+        achievedPct: tg.achievedPct ?? 0,
+        status: tg.status ?? "ACTIVE",
+        managerScore: tg.managerScore ?? null,
+        managerFeedback: tg.managerFeedback ?? null,
+        startDate: tg.startDate ? (tg.startDate.toDate ? tg.startDate.toDate().toISOString() : new Date(tg.startDate).toISOString()) : null,
+        endDate: tg.endDate ? (tg.endDate.toDate ? tg.endDate.toDate().toISOString() : new Date(tg.endDate).toISOString()) : null,
+      });
+    });
   }
 
   const kpisByRole = new Map<string, typeof kpiTemplates>();
