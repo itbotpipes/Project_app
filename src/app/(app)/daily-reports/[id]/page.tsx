@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { getCurrentUser } from "@/lib/auth";
 import { loadEmployeeTaskReport } from "@/lib/taskReportService";
+import { loadEmployeePerformance } from "@/lib/employeePerformance";
 import TaskReportView from "./TaskReportView";
 
 export default async function EmployeeTaskReportPage({
@@ -24,10 +25,17 @@ export default async function EmployeeTaskReportPage({
   const { id } = await params;
   const sp = await searchParams;
 
-  const data = await loadEmployeeTaskReport(id, sp, user);
+  const [data, performanceData] = await Promise.all([
+    loadEmployeeTaskReport(id, sp, user),
+    loadEmployeePerformance(id).catch((err) => {
+      console.error("Failed to load performanceData for report:", err);
+      return null;
+    }),
+  ]);
+
   if (!data) {
     redirect("/daily-reports");
   }
 
-  return <TaskReportView data={data} />;
+  return <TaskReportView data={data} performanceData={performanceData} />;
 }
