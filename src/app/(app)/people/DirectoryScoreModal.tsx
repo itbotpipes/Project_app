@@ -148,6 +148,7 @@ export default function DirectoryScoreModal({
                 rows={scoreData.rows}
                 behaviour={scoreData.behaviour}
                 targetAchievedPct={scoreData.targetAchievedPct}
+                targets={scoreData.targets ?? []}
                 onSaved={(newTotal) => {
                   if (onScoreUpdated) {
                     onScoreUpdated(employee.id, newTotal);

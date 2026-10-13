@@ -8,6 +8,7 @@ import NewTaskDialog from "../board/NewTaskDialog";
 import { loadTemplateOptions } from "@/lib/templates";
 import TaskLink from "../_components/TaskLink";
 import { batchFetchByIds, cachedFetch, fetchKpiTemplatesByRole } from "@/lib/cache";
+import DelegatedTargetsSection from "./DelegatedTargetsSection";
 
 const STATUS_TONE: Record<string, string> = {
   NEW: "bg-slate-100 text-slate-600",
@@ -31,7 +32,7 @@ export default async function DelegatedTasksPage() {
   if (!user) return null;
   if (!hasPermission(user, "delegated")) redirect("/board");
 
-  const [creatorSnap, reviewerSnap, assignableSnap, kpiOptionsSnap] = await Promise.all([
+  const [creatorSnap, reviewerSnap, assignableSnap, kpiOptionsSnap, assignedTargetsSnap] = await Promise.all([
     adminDb.collection("Task")
       .where("creatorId", "==", user.id)
       .get(),
@@ -44,6 +45,9 @@ export default async function DelegatedTasksPage() {
       300 // cache for 5 minutes
     ),
     adminDb.collection("KpiTemplate").get(),
+    adminDb.collection("Target")
+      .where("assignedById", "==", user.id)
+      .get(),
   ]);
 
   // Merge and filter unique tasks where user is creator or reviewer, excluding self-assigned and deleted
@@ -91,6 +95,31 @@ export default async function DelegatedTasksPage() {
     .map((d: any) => ({ id: d.id, kpiName: d.data().kpiName, kraName: d.data().kraName, roleId: d.data().roleId })) : [];
   const templates = await loadTemplateOptions();
 
+  const delegatedTargets = (assignedTargetsSnap.docs || []).map((d: any) => {
+    const data = d.data();
+    const assigneeMatch = assignableSnap.docs?.find((empDoc: any) => empDoc.id === data.employeeId);
+    const assigneeName = assigneeMatch ? assigneeMatch.data().name : "Team Member";
+    return {
+      id: d.id,
+      title: data.title,
+      description: data.description ?? null,
+      employeeId: data.employeeId,
+      assigneeName,
+      periodType: data.periodType ?? "month",
+      startDate: data.startDate ? (data.startDate.toDate ? data.startDate.toDate().toISOString() : new Date(data.startDate).toISOString()) : null,
+      endDate: data.endDate ? (data.endDate.toDate ? data.endDate.toDate().toISOString() : new Date(data.endDate).toISOString()) : null,
+      targetType: data.targetType ?? "NUMERIC",
+      metricUnit: data.metricUnit ?? "",
+      targetValue: data.targetValue ?? 1,
+      currentValue: data.currentValue ?? 0,
+      weightagePct: data.weightagePct ?? 20,
+      achievedPct: data.achievedPct ?? 0,
+      managerScore: data.managerScore ?? null,
+      managerFeedback: data.managerFeedback ?? null,
+      status: data.status ?? "ACTIVE",
+    };
+  });
+
   const open = delegated.filter((t) => t.status !== "CLOSED");
   const closed = delegated.filter((t) => t.status === "CLOSED");
 
@@ -131,6 +160,12 @@ export default async function DelegatedTasksPage() {
           </div>
         </Card>
       )}
+
+      {/* Delegated Targets Section */}
+      <DelegatedTargetsSection
+        targets={delegatedTargets}
+        assignablePeople={assignable}
+      />
 
       <Card>
         <SectionTitle>All delegated tasks</SectionTitle>

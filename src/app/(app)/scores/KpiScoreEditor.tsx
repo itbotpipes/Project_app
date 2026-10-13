@@ -4,6 +4,10 @@ import { useMemo, useState } from "react";
 import { saveMonthlyScorecard, saveYearlyReview, saveBehaviourReview } from "@/lib/actions/scores";
 import { BEHAVIOUR_ASPECTS, behaviourAverage, type BehaviourKey } from "@/lib/behaviour";
 
+import AssignTargetModal from "../_components/AssignTargetModal";
+import { reviewTarget } from "@/lib/actions/targets";
+import { Plus, Target as TargetIcon, Award, MessageSquare } from "lucide-react";
+
 type Row = {
   id: string;
   name: string;
@@ -25,6 +29,7 @@ export default function KpiScoreEditor({
   rows,
   behaviour,
   targetAchievedPct,
+  targets = [],
   onSaved,
 }: {
   employeeId: string;
@@ -34,8 +39,11 @@ export default function KpiScoreEditor({
   rows: Row[];
   behaviour: BehaviourInput | null;
   targetAchievedPct: number | null;
+  targets?: any[];
   onSaved?: (newTotal: number) => void;
 }) {
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [targetReviewMsg, setTargetReviewMsg] = useState<{ [id: string]: string }>({});
   const [beh, setBeh] = useState<Record<BehaviourKey, string>>(
     Object.fromEntries(
       BEHAVIOUR_ASPECTS.map((a) => [a.key, behaviour ? String(behaviour[a.key]) : "0"]),
@@ -249,6 +257,105 @@ export default function KpiScoreEditor({
           {reviewMsg && <span className="text-xs text-emerald-600">{reviewMsg}</span>}
         </div>
       </form>
+
+      {/* Periodic Assigned Targets Management & Review */}
+      <div className="rounded-lg bg-slate-50 p-3 space-y-3">
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-semibold uppercase tracking-wide text-slate-700 flex items-center gap-1.5">
+            <TargetIcon size={14} className="text-violet-600" />
+            Periodic Targets ({targets.length})
+          </div>
+          <button
+            type="button"
+            onClick={() => setShowAssignModal(true)}
+            className="inline-flex items-center gap-1 rounded-md bg-violet-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-violet-700 transition"
+          >
+            <Plus size={12} />
+            Assign Target
+          </button>
+        </div>
+
+        {targets.length > 0 ? (
+          <div className="space-y-2">
+            {targets.map((t: any) => (
+              <div key={t.id} className="rounded-md border border-slate-200 bg-white p-2.5 text-xs">
+                <div className="flex items-center justify-between">
+                  <span className="font-semibold text-slate-800">{t.title}</span>
+                  <span className="rounded bg-violet-50 px-1.5 py-0.5 text-[10px] font-bold text-violet-700">
+                    {t.weightagePct}% wt • {t.status}
+                  </span>
+                </div>
+                {t.targetType === "NUMERIC" ? (
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Progress: {t.currentValue} / {t.targetValue} {t.metricUnit} ({Math.round(t.achievedPct)}%)
+                  </div>
+                ) : (
+                  <div className="mt-1 text-[11px] text-slate-500">
+                    Deliverable Status: {t.status}
+                  </div>
+                )}
+
+                {/* Review inline form */}
+                <form
+                  action={async (fd) => {
+                    const res = await reviewTarget(fd);
+                    setTargetReviewMsg((prev) => ({
+                      ...prev,
+                      [t.id]: res.error ? res.error : "✓ Saved review",
+                    }));
+                    setTimeout(() => {
+                      setTargetReviewMsg((prev) => {
+                        const copy = { ...prev };
+                        delete copy[t.id];
+                        return copy;
+                      });
+                    }, 2500);
+                  }}
+                  className="mt-2 pt-2 border-t border-slate-100 flex flex-wrap items-center gap-2"
+                >
+                  <input type="hidden" name="targetId" value={t.id} />
+                  <label className="text-[10px] text-slate-500">
+                    Score %:
+                    <input
+                      name="managerScore"
+                      type="number"
+                      min="0"
+                      max="100"
+                      defaultValue={t.managerScore ?? t.achievedPct}
+                      className="ml-1 w-16 rounded border border-slate-200 px-1.5 py-0.5 text-xs"
+                    />
+                  </label>
+                  <input
+                    name="managerFeedback"
+                    type="text"
+                    defaultValue={t.managerFeedback || ""}
+                    placeholder="Feedback / review note..."
+                    className="flex-1 min-w-[120px] rounded border border-slate-200 px-2 py-0.5 text-xs"
+                  />
+                  <button className="rounded bg-violet-700 px-2 py-0.5 text-[11px] font-medium text-white hover:bg-violet-800">
+                    Save Review
+                  </button>
+                  {targetReviewMsg[t.id] && (
+                    <span className="text-[10px] text-emerald-600">{targetReviewMsg[t.id]}</span>
+                  )}
+                </form>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="text-[11px] text-slate-400 italic">No specific targets assigned yet for this period.</p>
+        )}
+      </div>
+
+      <AssignTargetModal
+        employeeId={employeeId}
+        employeeName={employeeName}
+        isOpen={showAssignModal}
+        onClose={() => setShowAssignModal(false)}
+        onTargetCreated={() => {
+          if (typeof window !== "undefined") window.location.reload();
+        }}
+      />
     </div>
   );
 }

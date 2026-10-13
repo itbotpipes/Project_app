@@ -100,6 +100,7 @@ export default async function ScoresPage({
   const tasks: any[] = [];
   const reviews: any[] = [];
   const behaviourReviews: any[] = [];
+  const targets: any[] = [];
 
   const employeeChunkQueries = chunkIds(empIds).filter(c => c.length > 0).map(async (chunk) => {
     return Promise.all([
@@ -111,12 +112,13 @@ export default async function ScoresPage({
         .get(),
       adminDb.collection("YearlyReview").where("employeeId", "in", chunk).where("year", "==", year).get(),
       adminDb.collection("BehaviourReview").where("employeeId", "in", chunk).where("year", "==", year).where("month", "==", month).get(),
+      adminDb.collection("Target").where("employeeId", "in", chunk).get(),
     ]);
   });
   
   const employeeChunkResults = await Promise.all(employeeChunkQueries);
   
-  for (const [scoresSnap, tasksSnap, reviewsSnap, behaviourSnap] of employeeChunkResults) {
+  for (const [scoresSnap, tasksSnap, reviewsSnap, behaviourSnap, targetsSnap] of employeeChunkResults) {
     scoresSnap.docs?.forEach((d: any) => existingScores.push({ id: d.id, ...d.data() }));
     tasksSnap.docs?.forEach((d: any) => {
       const t = d.data();
@@ -135,6 +137,7 @@ export default async function ScoresPage({
     });
     reviewsSnap.docs?.forEach((d: any) => reviews.push({ id: d.id, ...d.data() }));
     behaviourSnap.docs?.forEach((d: any) => behaviourReviews.push({ id: d.id, ...d.data() }));
+    targetsSnap.docs?.forEach((d: any) => targets.push({ id: d.id, ...d.data() }));
   }
 
   const kpisByRole = new Map<string, typeof kpiTemplates>();
@@ -148,6 +151,12 @@ export default async function ScoresPage({
     const arr = tasksByEmp.get(t.assigneeId) ?? [];
     arr.push(t);
     tasksByEmp.set(t.assigneeId, arr);
+  }
+  const targetsByEmp = new Map<string, any[]>();
+  for (const tg of targets) {
+    const arr = targetsByEmp.get(tg.employeeId) ?? [];
+    arr.push(tg);
+    targetsByEmp.set(tg.employeeId, arr);
   }
   const scoreKey = (e: string, k: string) => `${e}|${k}`;
   const scoreMap = new Map(existingScores.map((s) => [scoreKey(s.employeeId, s.kpiTemplateId), s]));
@@ -311,6 +320,7 @@ export default async function ScoresPage({
                           : null
                       }
                       targetAchievedPct={review?.targetAchievedPct ?? null}
+                      targets={targetsByEmp.get(e.id) ?? []}
                     />
                   </div>
                 </details>

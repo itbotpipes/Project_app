@@ -67,10 +67,11 @@ export async function loadEmployeePerformance(employeeId: string) {
   const weekStart = mondayOf(now);
   const minQueryDate = new Date(Math.min(startOfMonth.getTime(), weekStart.getTime()) - 30 * 86400000);
 
-  const [cardsSnap, reviewSnap, behaviourSnap, employeeDoc] = await Promise.all([
+  const [cardsSnap, reviewSnap, behaviourSnap, targetsSnap, employeeDoc] = await Promise.all([
     adminDb.collection("MonthlyScorecard").where("employeeId", "==", employeeId).get(),
     adminDb.collection("YearlyReview").where("employeeId", "==", employeeId).where("year", "==", nowYear).limit(1).get(),
     adminDb.collection("BehaviourReview").where("employeeId", "==", employeeId).get(),
+    adminDb.collection("Target").where("employeeId", "==", employeeId).get(),
     adminDb.collection("Employee").doc(employeeId).get(),
   ]);
 
@@ -341,6 +342,54 @@ export async function loadEmployeePerformance(employeeId: string) {
     liveScore: monthLiveScore,
   };
 
+  // Process Targets
+  const allTargets = (targetsSnap.docs || []).map((d) => {
+    const data = d.data();
+    const sDate = toDate(data.startDate);
+    const eDate = toDate(data.endDate);
+    const achievedPct = data.achievedPct != null ? Number(data.achievedPct) : 0;
+    const managerScore = data.managerScore != null ? Number(data.managerScore) : null;
+    const finalScore = managerScore != null ? managerScore : achievedPct;
+
+    return {
+      id: d.id,
+      title: data.title,
+      description: data.description ?? null,
+      periodType: data.periodType ?? "month",
+      startDate: sDate?.toISOString() ?? null,
+      endDate: eDate?.toISOString() ?? null,
+      targetType: data.targetType ?? "NUMERIC",
+      metricUnit: data.metricUnit ?? "",
+      targetValue: data.targetValue != null ? Number(data.targetValue) : 1,
+      currentValue: data.currentValue != null ? Number(data.currentValue) : 0,
+      weightagePct: data.weightagePct != null ? Number(data.weightagePct) : 20,
+      achievedPct,
+      managerScore,
+      managerFeedback: data.managerFeedback ?? null,
+      status: data.status ?? "ACTIVE",
+      reviewedAt: data.reviewedAt ? toDate(data.reviewedAt)?.toISOString() : null,
+      finalScore,
+    };
+  });
+
+  // Active targets relevant to current month
+  const activeTargetsThisMonth = allTargets.filter((t) => {
+    if (t.status === "CANCELLED") return false;
+    const s = t.startDate ? new Date(t.startDate).getTime() : 0;
+    const e = t.endDate ? new Date(t.endDate).getTime() : Infinity;
+    return e >= startOfMonth.getTime() && s <= now.getTime();
+  });
+
+  // Calculate weighted target achievement rate for current month
+  let targetTotalWeight = 0;
+  let targetWeightedScore = 0;
+  for (const t of activeTargetsThisMonth) {
+    const w = t.weightagePct || 20;
+    targetTotalWeight += w;
+    targetWeightedScore += (t.finalScore * w);
+  }
+  const averageTargetScore = targetTotalWeight > 0 ? Math.round(targetWeightedScore / targetTotalWeight) : null;
+
   // Add live current-month point to trend if not already finalized in cards
   const hasCurrentCard = cards.some((c) => c.year === nowYear && c.month === nowMonth);
   const hasLiveActivity = monthTasks.length > 0 || (kpiAnalytics && (kpiAnalytics.totalTasks > 0 || kpiAnalytics.totalPointsEarned > 0));
@@ -357,10 +406,17 @@ export async function loadEmployeePerformance(employeeId: string) {
     });
   }
 
+  // Dynamic Target Component for Increment (uses active target score or review score)
+  const effectiveTargetPct = averageTargetScore != null 
+    ? averageTargetScore 
+    : (review?.targetAchievedPct != null ? review.targetAchievedPct : null);
+  const dynamicTargetComponent = effectiveTargetPct != null ? Math.round((effectiveTargetPct / 100) * 10 * 10) / 10 : null;
+  const dynamicIncrementTotal = kpiComponent + (behaviourComponent ?? 0) + (dynamicTargetComponent ?? 0);
+
   const incrementMetadata = {
     scoringModel: "ANNUAL_INCREMENT" as const,
     maxTotalPct: 20,
-    projectedTotalPct: Math.round(incrementTotal * 10) / 10,
+    projectedTotalPct: Math.round(dynamicIncrementTotal * 10) / 10,
     components: [
       {
         key: "kpi",
@@ -382,9 +438,11 @@ export async function loadEmployeePerformance(employeeId: string) {
         key: "target",
         label: "Target vs Actual",
         maxPct: 10,
-        valuePct: targetComponent,
+        valuePct: dynamicTargetComponent,
         formula: "10% × (Target achievement % ÷ 100)",
-        basis: targetComponent != null ? `Annual target achievement of ${review?.targetAchievedPct}%` : "Pending annual target achievement evaluation",
+        basis: effectiveTargetPct != null 
+          ? `Target achievement of ${effectiveTargetPct}% (${activeTargetsThisMonth.length} assigned target(s))` 
+          : "Pending target evaluation",
       },
     ],
   };
@@ -399,9 +457,15 @@ export async function loadEmployeePerformance(employeeId: string) {
     nowYear,
     kpiComponent,
     behaviourComponent,
-    targetComponent,
-    incrementTotal,
+    targetComponent: dynamicTargetComponent,
+    incrementTotal: dynamicIncrementTotal,
     incrementMetadata,
+    targets: allTargets,
+    targetsSummary: {
+      total: allTargets.length,
+      activeThisMonth: activeTargetsThisMonth.length,
+      averageScore: averageTargetScore,
+    },
     history,
     bucketData,
     bucketFillData,

@@ -28,6 +28,8 @@ import TaskLink from "./TaskLink";
 import { Card, SectionTitle, Badge } from "./ui";
 import { monthLabel } from "@/lib/scores";
 import type { KpiPerformanceAnalyticsSummary, KpiBucketAnalytics } from "@/lib/kpiPoints";
+import TargetsSection from "./TargetsSection";
+import AssignTargetModal from "./AssignTargetModal";
 
 type CompletedTaskItem = {
   id: string;
@@ -175,6 +177,7 @@ export default function SimplifiedPerformanceView({
 
   // Calculation explanation modal state
   const [showCalculationModal, setShowCalculationModal] = useState(false);
+  const [showAssignTargetModal, setShowAssignTargetModal] = useState(false);
 
   // Accordion states for secondary sections
   const [expandedKpiId, setExpandedKpiId] = useState<string | null>(null);
@@ -765,6 +768,15 @@ export default function SimplifiedPerformanceView({
         </Card>
       </div>
 
+      {/* ── 3.5 ASSIGNED TARGETS & GOALS SECTION ──────────── */}
+      <TargetsSection
+        targets={(performanceData as any).targets ?? []}
+        isManager={isManagerOrAdmin}
+        employeeId={performanceData.employee?.id ?? ""}
+        employeeName={employeeName ?? performanceData.employee?.name ?? "Employee"}
+        onOpenAssignModal={() => setShowAssignTargetModal(true)}
+      />
+
       {/* ── 4. PROMINENT COMPLETED TASKS / TASKS DONE SECTION ──────────── */}
       <Card className="p-4 sm:p-5">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
@@ -1230,6 +1242,21 @@ export default function SimplifiedPerformanceView({
                   <p>Scored across 6 human-judged qualitative criteria (each 0–10). Multiplied by 10 to produce a 0–100% assessment percentage used in annual increment calculations.</p>
                 </div>
               </div>
+
+              {/* Formula 9: Assigned Periodic Targets & Manager Review */}
+              <div className="rounded-xl bg-violet-50/70 p-3.5 border border-violet-200">
+                <span className="font-semibold text-violet-900 block text-xs">
+                  9. Assigned Periodic Targets &amp; Evaluation Formula (In Words):
+                </span>
+                <p className="mt-1 font-mono text-[11px] font-semibold text-violet-800">
+                  Target Score (%) = For Numeric: Min(100, (Logged Value ÷ Target Quantity) × 100) | For Milestone: Manager Evaluated % (0–100%)
+                </p>
+                <div className="mt-2 space-y-1 text-[11px] text-violet-950">
+                  <p>• <b>Weighted Target Average:</b> Σ(Target Final Score × Target Weightage %) ÷ Σ(Target Weightage %).</p>
+                  <p>• <b>Performance Impact:</b> Feeds directly into the Target vs Actual Component (Max 10%) of the Annual Increment projection and monthly review.</p>
+                  <p>• <b>Manager Review:</b> Managers evaluate deliverables, verify numeric milestones, and provide written feedback notes with final score certification.</p>
+                </div>
+              </div>
             </div>
           )}
         </div>
@@ -1273,7 +1300,7 @@ export default function SimplifiedPerformanceView({
                   Weightage × (60% Completion + 25% Consistency + 15% Quality)
                 </div>
                 <p className="text-slate-600">
-                  • <b>Possible Points ({totalPossible} pts):</b> Total weightage of all KPI areas assigned to your role.
+                  • <b>Assigned Targets &amp; Goals:</b> Any periodic targets assigned by authority appear in your Targets section and directly feed into the Target vs Actual component (Max 10% appraisal weight).
                 </p>
               </div>
 
@@ -1296,6 +1323,17 @@ export default function SimplifiedPerformanceView({
           </div>
         </div>
       )}
+
+      {/* Assign Target Modal */}
+      <AssignTargetModal
+        employeeId={performanceData.employee?.id ?? ""}
+        employeeName={employeeName ?? performanceData.employee?.name ?? "Employee"}
+        isOpen={showAssignTargetModal}
+        onClose={() => setShowAssignTargetModal(false)}
+        onTargetCreated={() => {
+          if (typeof window !== "undefined") window.location.reload();
+        }}
+      />
     </div>
   );
 }

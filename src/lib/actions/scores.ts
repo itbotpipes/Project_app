@@ -314,6 +314,29 @@ export async function getEmployeeScoringData(employeeId: string, year: number, m
     .get();
   const review = !reviewSnap.empty ? reviewSnap.docs[0].data() : null;
 
+  // Fetch Targets for employee
+  const targetsSnap = await adminDb.collection("Target")
+    .where("employeeId", "==", employeeId)
+    .get();
+  const targets = (targetsSnap.docs || []).map((d) => {
+    const data = d.data();
+    return {
+      id: d.id,
+      title: data.title,
+      description: data.description ?? null,
+      periodType: data.periodType ?? "month",
+      targetType: data.targetType ?? "NUMERIC",
+      metricUnit: data.metricUnit ?? "",
+      targetValue: data.targetValue ?? 1,
+      currentValue: data.currentValue ?? 0,
+      weightagePct: data.weightagePct ?? 20,
+      achievedPct: data.achievedPct ?? 0,
+      managerScore: data.managerScore ?? null,
+      managerFeedback: data.managerFeedback ?? null,
+      status: data.status ?? "ACTIVE",
+    };
+  });
+
   return {
     employee: {
       id: employeeId,
@@ -336,5 +359,6 @@ export async function getEmployeeScoringData(employeeId: string, year: number, m
         }
       : null,
     targetAchievedPct: review?.targetAchievedPct ?? null,
+    targets,
   };
 }
