@@ -10,7 +10,7 @@ import NewTaskDialog from "./NewTaskDialog";
 import KanbanBoard from "./KanbanBoard";
 import Celebration from "../_components/Celebration";
 import { loadTemplateOptions } from "@/lib/templates";
-import { batchFetchByIds, cachedFetch } from "@/lib/cache";
+import { batchFetchByIds, cachedFetch, fetchAllRoles } from "@/lib/cache";
 import ManageKpisDialog from "./ManageKpisDialog";
 import { calculateIndividualTaskPoints } from "@/lib/kpiPoints";
 
