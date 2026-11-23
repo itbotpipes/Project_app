@@ -130,6 +130,26 @@ export async function createTask(formData: FormData) {
       detail: title,
       createdAt: now,
     });
+
+    // Optionally save as a personal template
+    const shouldSaveTemplate = formData.get("saveAsTemplate") === "on";
+    const customTemplateName = String(formData.get("saveTemplateName") || title).trim();
+    if (shouldSaveTemplate && customTemplateName) {
+      await adminDb.collection("TaskTemplate").add({
+        name: customTemplateName,
+        title,
+        description: String(formData.get("description") || "") || null,
+        kpiTemplateId,
+        sizeLabel,
+        category,
+        roleId: user.roleId || null,
+        isPersonal: true,
+        createdById: user.id,
+        checklistJSON: checklist.length ? JSON.stringify(checklist) : null,
+        createdAt: now,
+      });
+      revalidatePath("/templates");
+    }
   }
 
   revalidatePath("/board");

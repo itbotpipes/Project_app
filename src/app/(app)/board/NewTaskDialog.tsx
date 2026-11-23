@@ -19,6 +19,8 @@ export type TemplateOpt = {
   kpiTemplateId: string | null;
   sizeLabel: string | null;
   roleId: string | null;
+  isPersonal?: boolean;
+  createdById?: string;
   checklist: string[];
 };
 
@@ -59,6 +61,8 @@ export default function NewTaskDialog({
 
   const [showLoop, setShowLoop] = useState(false);
   const [watcherIds, setWatcherIds] = useState<string[]>([]);
+  const [saveAsTemplate, setSaveAsTemplate] = useState(false);
+  const [saveTemplateName, setSaveTemplateName] = useState("");
   const nameById = new Map(people.map((p) => [p.id, p.name]));
 
   function handleVoiceParsed(result: VoiceParseResult) {
@@ -77,7 +81,13 @@ export default function NewTaskDialog({
 
   const firstAssigneeRoleId = people.find((p) => assigneeIds.includes(p.id))?.roleId;
   const filteredKpiOptions = kpiOptions.filter((k) => !k.roleId || k.roleId === firstAssigneeRoleId);
-  const templatesForAssignee = (templates ?? []).filter((t) => !t.roleId || t.roleId === firstAssigneeRoleId);
+  
+  // Everyone sees their own created templates + position/general templates
+  const myTemplates = (templates ?? []).filter((t) => t.createdById === selfId);
+  const sharedTemplates = (templates ?? []).filter(
+    (t) => t.createdById !== selfId && (!t.roleId || t.roleId === firstAssigneeRoleId)
+  );
+  const templatesForAssignee = [...myTemplates, ...sharedTemplates];
 
   const filteredPeople = people.filter((p) =>
     p.name.toLowerCase().includes(assigneeSearch.toLowerCase())
@@ -119,6 +129,8 @@ export default function NewTaskDialog({
     setChecklistDraft("");
     setShowLoop(false);
     setWatcherIds([]);
+    setSaveAsTemplate(false);
+    setSaveTemplateName("");
     setErrorMsg(null);
   }
 
@@ -200,24 +212,45 @@ export default function NewTaskDialog({
               />
 
               {templates && templates.length > 0 && (
-                <label className="block rounded-lg border border-blue-200 bg-blue-50/60 px-2.5 py-2 text-xs font-medium text-blue-700">
-                  <span className="flex items-center gap-1.5"><FileStack size={13} /> Start from a template</span>
+                <div className="rounded-xl border border-blue-200 bg-blue-50/60 p-2.5 text-xs font-medium text-blue-900 space-y-1.5">
+                  <div className="flex items-center justify-between">
+                    <span className="flex items-center gap-1.5 font-bold">
+                      <FileStack size={14} className="text-blue-600" /> Start from a template
+                    </span>
+                    <a
+                      href="/templates"
+                      target="_blank"
+                      className="text-[11px] font-semibold text-blue-600 hover:underline"
+                    >
+                      Manage templates ↗
+                    </a>
+                  </div>
                   <select
                     onChange={(e) => e.target.value && applyTemplate(e.target.value)}
                     defaultValue=""
-                    className="mt-1 w-full rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-sm text-slate-700"
+                    className="w-full rounded-lg border border-blue-200 bg-white px-2 py-1.5 text-sm text-slate-800 focus:outline-hidden"
                   >
                     <option value="">— write it myself —</option>
-                    {templatesForAssignee.map((t) => (
-                      <option key={t.id} value={t.id}>
-                        {t.name}
-                      </option>
-                    ))}
+                    {myTemplates.length > 0 && (
+                      <optgroup label="⭐ My Personal Templates">
+                        {myTemplates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
+                    {sharedTemplates.length > 0 && (
+                      <optgroup label="📋 Role & Shared Templates">
+                        {sharedTemplates.map((t) => (
+                          <option key={t.id} value={t.id}>
+                            {t.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    )}
                   </select>
-                  {templatesForAssignee.length === 0 && (
-                    <p className="mt-1 font-normal text-blue-400">No templates set for this person&apos;s position yet.</p>
-                  )}
-                </label>
+                </div>
               )}
 
               <input
@@ -523,6 +556,34 @@ export default function NewTaskDialog({
                 <label className="flex items-center gap-2">
                   <input type="checkbox" name="reviewRequired" /> Needs manager review
                 </label>
+              </div>
+
+              {/* Save as personal template option */}
+              <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3 space-y-2">
+                <label className="flex items-center gap-2 text-xs font-semibold text-slate-700 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    name="saveAsTemplate"
+                    checked={saveAsTemplate}
+                    onChange={(e) => setSaveAsTemplate(e.target.checked)}
+                    className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
+                  />
+                  <span>Save this task as my personal template</span>
+                </label>
+                {saveAsTemplate && (
+                  <div className="pt-1">
+                    <input
+                      name="saveTemplateName"
+                      value={saveTemplateName}
+                      onChange={(e) => setSaveTemplateName(e.target.value)}
+                      placeholder={title ? `Template name (e.g. ${title})` : "Enter template name"}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-xs outline-none focus:border-blue-500"
+                    />
+                    <p className="text-[10px] text-slate-400 mt-1">
+                      Saved to your personal templates so you can reuse this task and its checklist anytime.
+                    </p>
+                  </div>
+                )}
               </div>
               {errorMsg && (
                 <div className="mt-2 text-xs font-semibold text-red-600 bg-red-50 rounded-lg p-2.5">

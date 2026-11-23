@@ -13,6 +13,7 @@ export async function createTemplate(formData: FormData) {
   if (!name || !title) return;
 
   const checklist = formData.getAll("checklist").map(String).map((s) => s.trim()).filter(Boolean);
+  const isPersonal = formData.get("isPersonal") === "true" || formData.get("isPersonal") === "on";
 
   await adminDb.collection("TaskTemplate").add({
     name,
@@ -23,11 +24,13 @@ export async function createTemplate(formData: FormData) {
     sizeLabel: String(formData.get("sizeLabel") || "") || null,
     category: String(formData.get("category") || "").trim() || null,
     checklistJSON: checklist.length ? JSON.stringify(checklist) : null,
+    isPersonal,
     createdById: user.id,
     createdAt: new Date(),
   });
 
   revalidatePath("/templates");
+  revalidatePath("/board");
   revalidatePath("/admin");
 }
 

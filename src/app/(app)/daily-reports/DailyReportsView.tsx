@@ -22,6 +22,7 @@ import {
   UserX,
   Layers,
   ArrowUpRight,
+  Building2,
 } from "lucide-react";
 import type { DailyReportSummary, PersonDailyReport } from "@/lib/dailyReportService";
 import Avatar from "../_components/Avatar";
@@ -277,8 +278,17 @@ export default function DailyReportsView({
             )}
           </div>
 
-          {/* Department Filter & Expand/Collapse All */}
-          <div className="flex items-center gap-2">
+          {/* Department Filter & Expand/Collapse All & Link to Department Summary */}
+          <div className="flex flex-wrap items-center gap-2">
+            <Link
+              href={`/daily-summary?view=department${departmentFilter !== "ALL" ? `&dept=${encodeURIComponent(departmentFilter)}` : ""}&date=${summary.dateValue}`}
+              className="flex items-center gap-1.5 rounded-xl border border-blue-200 bg-blue-50/80 hover:bg-blue-100 px-3 py-1.5 text-xs font-semibold text-blue-700 transition shadow-2xs"
+              title="Open Official Department Daily Work Summary & Shareable Report"
+            >
+              <Building2 size={13} />
+              <span>{departmentFilter !== "ALL" ? `${departmentFilter} Work Summary` : "Department Work Summaries"} →</span>
+            </Link>
+
             <select
               value={departmentFilter}
               onChange={(e) => setDepartmentFilter(e.target.value)}
