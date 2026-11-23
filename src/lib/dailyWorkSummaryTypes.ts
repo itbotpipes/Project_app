@@ -12,9 +12,9 @@ export type DailySummaryTaskItem = {
   carryCount?: number;
   kpiName?: string | null;
   projectName?: string | null;
-  basePoints?: number;
-  qualityBonusPoints?: number;
-  totalApprovedPoints?: number;
+  basePoints?: number | null;
+  qualityBonusPoints?: number | null;
+  totalApprovedPoints?: number | null;
   managerScore?: number | null;
 };
 

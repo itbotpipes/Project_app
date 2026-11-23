@@ -55,6 +55,26 @@ export function getNextWorkingDay(fromDate: Date): Date {
   return next;
 }
 
+/** Recursively cleans undefined properties from objects/arrays so Firestore never throws */
+function sanitizeFirestoreDoc<T>(obj: T): T {
+  if (obj === null || obj === undefined) return null as any;
+  if (Array.isArray(obj)) {
+    return obj.map(sanitizeFirestoreDoc) as any;
+  }
+  if (typeof obj === "object" && !(obj instanceof Date)) {
+    const cleaned: any = {};
+    for (const [key, value] of Object.entries(obj)) {
+      if (value !== undefined) {
+        cleaned[key] = sanitizeFirestoreDoc(value);
+      } else {
+        cleaned[key] = null;
+      }
+    }
+    return cleaned;
+  }
+  return obj;
+}
+
 /** Helper to convert task docs to summary task items */
 function mapDocToSummaryItem(doc: any, kpiMap?: Map<string, string>): DailySummaryTaskItem {
   const data = doc.data ? doc.data() : doc;
@@ -74,7 +94,7 @@ function mapDocToSummaryItem(doc: any, kpiMap?: Map<string, string>): DailySumma
     status: data.status || "NEW",
     priority,
     sizeLabel: data.sizeLabel || null,
-    estimatedMins: data.estimatedMins || null,
+    estimatedMins: data.estimatedMins ?? null,
     dueAt: parseDate(data.dueAt)?.toISOString() || null,
     completedAt: parseDate(data.completedAt)?.toISOString() || null,
     holdReason: data.holdReason || null,
@@ -82,10 +102,10 @@ function mapDocToSummaryItem(doc: any, kpiMap?: Map<string, string>): DailySumma
     carryCount: data.carryCount || 0,
     kpiName,
     projectName: data.projectName || null,
-    basePoints: data.basePoints ?? undefined,
-    qualityBonusPoints: data.qualityBonusPoints ?? undefined,
-    totalApprovedPoints: data.totalApprovedPoints ?? undefined,
-    managerScore: data.managerScore ?? undefined,
+    basePoints: data.basePoints !== undefined && data.basePoints !== null ? Number(data.basePoints) : null,
+    qualityBonusPoints: data.qualityBonusPoints !== undefined && data.qualityBonusPoints !== null ? Number(data.qualityBonusPoints) : null,
+    totalApprovedPoints: data.totalApprovedPoints !== undefined && data.totalApprovedPoints !== null ? Number(data.totalApprovedPoints) : null,
+    managerScore: data.managerScore !== undefined && data.managerScore !== null ? Number(data.managerScore) : null,
   };
 }
 
@@ -258,10 +278,10 @@ export async function computeEmployeeDailySummary(
     .collection("DailyWorkSummary")
     .doc(summaryDocId)
     .set(
-      {
+      sanitizeFirestoreDoc({
         ...summaryRecord,
         createdAt: new Date().toISOString(),
-      },
+      }),
       { merge: true }
     );
 
