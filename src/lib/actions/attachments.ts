@@ -3,47 +3,8 @@
 import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
-import { v2 as cloudinary } from "cloudinary";
 import { sendNotification } from "@/lib/notificationService";
-
-// Configure Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET,
-});
-
-export async function uploadFileBufferToCloudinary(file: File): Promise<{ secureUrl: string; kind: string; filename: string }> {
-  const bytes = Buffer.from(await file.arrayBuffer());
-  const isImage = file.type.startsWith("image/");
-  const isAudioVideo = file.type.startsWith("audio/") || file.type.startsWith("video/");
-  const resourceType = isImage ? "image" : isAudioVideo ? "video" : "raw";
-  const lastDot = file.name.lastIndexOf(".");
-  const fileExtension = lastDot !== -1 ? file.name.substring(lastDot) : "";
-  const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-  const publicId = `${uniqueId}${fileExtension}`;
-
-  const uploadResult = (await new Promise((resolve, reject) => {
-    const uploadStream = cloudinary.uploader.upload_stream(
-      {
-        folder: "taskflow_uploads",
-        resource_type: resourceType,
-        public_id: publicId,
-      },
-      (error, result) => {
-        if (error) reject(error);
-        else resolve(result);
-      }
-    );
-    uploadStream.end(bytes);
-  })) as any;
-
-  return {
-    secureUrl: uploadResult.secure_url,
-    kind: isImage ? "IMAGE" : "FILE",
-    filename: file.name || "upload",
-  };
-}
+import { uploadFileBufferToCloudinary } from "@/lib/cloudinaryService";
 
 export async function addComment(formData: FormData) {
   const user = await getCurrentUser();
@@ -198,45 +159,17 @@ export async function uploadTaskAttachment(formData: FormData) {
   if (file.size > 15 * 1024 * 1024) return { error: "File too large (max 15MB)" };
 
   try {
-    const bytes = Buffer.from(await file.arrayBuffer());
-    
-    // Determine dynamic resource_type for Cloudinary to avoid corruption of documents (e.g. PPT, PDF, DOCX)
-    const isImage = file.type.startsWith("image/");
-    const isAudioVideo = file.type.startsWith("audio/") || file.type.startsWith("video/");
-    const resourceType = isImage ? "image" : isAudioVideo ? "video" : "raw";
-
-    // Extract file extension to preserve in Cloudinary publicId (vital for raw documents like PPT, DOCX)
-    const lastDot = file.name.lastIndexOf(".");
-    const fileExtension = lastDot !== -1 ? file.name.substring(lastDot) : "";
-    const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    const publicId = `${uniqueId}${fileExtension}`;
-
-    // Upload to Cloudinary using a promise wrapper
-    const uploadResult = await new Promise((resolve, reject) => {
-      const uploadStream = cloudinary.uploader.upload_stream(
-        { 
-          folder: "taskflow_uploads", 
-          resource_type: resourceType,
-          public_id: publicId
-        },
-        (error, result) => {
-          if (error) reject(error);
-          else resolve(result);
-        }
-      );
-      uploadStream.end(bytes);
-    }) as any;
-
-    const secureUrl = uploadResult.secure_url;
+    const uploaded = await uploadFileBufferToCloudinary(file);
+    const secureUrl = uploaded.secureUrl;
     const now = new Date();
     const transcript = formData.get("transcript") ? String(formData.get("transcript")) : null;
 
     // Save attachment to Firestore
     const docRef = await adminDb.collection("Attachment").add({
       taskId,
-      kind,
+      kind: uploaded.kind,
       url: secureUrl,
-      filename: file.name || "upload",
+      filename: uploaded.filename,
       createdAt: now,
       transcript: transcript || null,
     });

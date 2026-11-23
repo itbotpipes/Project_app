@@ -6,7 +6,7 @@ import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
 import { sendNotification } from "@/lib/notificationService";
 import { computeTaskPoints } from "@/lib/qualityPoints";
-import { uploadFileBufferToCloudinary } from "./attachments";
+import { uploadFileBufferToCloudinary } from "@/lib/cloudinaryService";
 
 export async function createTask(formData: FormData) {
   const user = await getCurrentUser();
