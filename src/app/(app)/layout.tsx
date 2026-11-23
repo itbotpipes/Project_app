@@ -6,6 +6,7 @@ import Sidebar from "./_components/Sidebar";
 import NotificationBell from "./_components/NotificationBell";
 import ReminderPoller from "./_components/ReminderPoller";
 import WatcherPoller from "./_components/WatcherPoller";
+import ReviewNotificationToasts from "./_components/ReviewNotificationToasts";
 import { TaskDrawerProvider } from "./_components/TaskDrawerContext";
 import TaskDrawerHost from "./_components/TaskDrawerHost";
 
@@ -83,6 +84,7 @@ export default async function AppLayout({
         </div>
         <ReminderPoller />
         <WatcherPoller />
+        <ReviewNotificationToasts />
         <TaskDrawerHost />
       </div>
     </TaskDrawerProvider>

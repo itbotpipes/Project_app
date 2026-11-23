@@ -29,7 +29,7 @@ import TaskLink from "../_components/TaskLink";
 import {
   type DepartmentDailyWorkSummary,
   generateDepartmentSummaryShareText,
-} from "@/lib/dailyWorkSummaryService";
+} from "@/lib/dailyWorkSummaryTypes";
 
 export default function DepartmentSummaryCard({
   department,

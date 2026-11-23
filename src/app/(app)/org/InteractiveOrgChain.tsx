@@ -179,7 +179,7 @@ export default function InteractiveOrgChain({
     const isTarget = dragOverEmpId === node.id && draggedEmpId !== node.id;
     const isValidTarget = isTarget && draggedEmpId && !isDescendant(node, draggedEmpId);
     const isInvalidTarget = isTarget && !isValidTarget;
-    const badge = getHierarchyBadge(node.depth ?? depth, node.level, node.roleTitle, node.systemRole);
+    const badge = getHierarchyBadge((node as any).depth ?? depth, node.level, node.roleTitle, node.systemRole);
 
     // Check search / filter match
     const q = searchQuery.toLowerCase().trim();

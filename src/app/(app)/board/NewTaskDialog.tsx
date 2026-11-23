@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Plus, ListChecks, X, FileStack, Search, Check } from "lucide-react";
+import { useState, useRef } from "react";
+import { Plus, ListChecks, X, FileStack, Search, Check, Paperclip, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
 import { createTask } from "@/lib/actions/tasks";
 import BucketFill from "../_components/BucketFill";
 import DateTimePicker from "../_components/DateTimePicker";
@@ -63,7 +63,27 @@ export default function NewTaskDialog({
   const [watcherIds, setWatcherIds] = useState<string[]>([]);
   const [saveAsTemplate, setSaveAsTemplate] = useState(false);
   const [saveTemplateName, setSaveTemplateName] = useState("");
+  const [attachedFiles, setAttachedFiles] = useState<File[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const nameById = new Map(people.map((p) => [p.id, p.name]));
+
+  function handleFilesSelected(e: React.ChangeEvent<HTMLInputElement>) {
+    if (!e.target.files) return;
+    const newFiles = Array.from(e.target.files);
+    setAttachedFiles((prev) => [...prev, ...newFiles]);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  function removeAttachedFile(index: number) {
+    setAttachedFiles((prev) => prev.filter((_, i) => i !== index));
+  }
+
+  function formatBytes(bytes: number) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
 
   function handleVoiceParsed(result: VoiceParseResult) {
     if (result.title) setTitle(result.title);
@@ -131,6 +151,8 @@ export default function NewTaskDialog({
     setWatcherIds([]);
     setSaveAsTemplate(false);
     setSaveTemplateName("");
+    setAttachedFiles([]);
+    setIsSubmitting(false);
     setErrorMsg(null);
   }
 
@@ -193,13 +215,23 @@ export default function NewTaskDialog({
                 }
                 
                 setErrorMsg(null);
+                setIsSubmitting(true);
                 if (groupId) fd.set("groupId", groupId);
-                const res = await createTask(fd);
-                if (res?.error) {
-                  setErrorMsg(res.error);
-                } else {
-                  setOpen(false);
-                  resetForm();
+                attachedFiles.forEach((file) => {
+                  fd.append("attachments", file);
+                });
+                try {
+                  const res = await createTask(fd);
+                  if (res?.error) {
+                    setErrorMsg(res.error);
+                  } else {
+                    setOpen(false);
+                    resetForm();
+                  }
+                } catch (err: any) {
+                  setErrorMsg(err?.message || "Failed to create task");
+                } finally {
+                  setIsSubmitting(false);
                 }
               }}
               className="space-y-3"
@@ -269,6 +301,64 @@ export default function NewTaskDialog({
                 placeholder="Details (optional)"
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
               />
+
+              {/* Attach Files (Multiple files upload option) */}
+              <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50/60 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <span className="flex items-center gap-1.5 text-xs font-semibold text-slate-700">
+                    <Paperclip size={14} className="text-blue-600" /> Attach Files
+                    <span className="text-[10px] text-slate-400 font-normal hidden sm:inline">
+                      (Images, PDFs, Docs, Sheets)
+                    </span>
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => fileInputRef.current?.click()}
+                    className="inline-flex items-center gap-1 rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-50 shadow-2xs transition-colors"
+                  >
+                    <Plus size={13} /> Add files
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
+                    onChange={handleFilesSelected}
+                    className="hidden"
+                  />
+                </div>
+
+                {attachedFiles.length > 0 && (
+                  <div className="mt-2 space-y-1.5 max-h-36 overflow-y-auto pr-1">
+                    {attachedFiles.map((f, idx) => (
+                      <div
+                        key={idx}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-800 shadow-2xs"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          {f.type.startsWith("image/") ? (
+                            <ImageIcon size={14} className="text-purple-600 shrink-0" />
+                          ) : (
+                            <FileText size={14} className="text-blue-600 shrink-0" />
+                          )}
+                          <span className="truncate font-medium">{f.name}</span>
+                          <span className="text-[10px] text-slate-400 shrink-0">
+                            ({formatBytes(f.size)})
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeAttachedFile(idx)}
+                          className="text-slate-400 hover:text-rose-600 transition-colors p-0.5 rounded"
+                          title="Remove file"
+                        >
+                          <X size={13} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
 
               {/* + Add Checklist */}
               <div className="rounded-lg border border-slate-200 p-2.5">
@@ -600,9 +690,17 @@ export default function NewTaskDialog({
                 </button>
                 <button
                   type="submit"
-                  className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white hover:bg-blue-700"
+                  disabled={isSubmitting}
+                  className="rounded-lg bg-blue-600 px-3.5 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-60 flex items-center gap-1.5"
                 >
-                  🚀 Assign Task
+                  {isSubmitting ? (
+                    <>
+                      <Loader2 size={15} className="animate-spin" />
+                      <span>Assigning &amp; Uploading...</span>
+                    </>
+                  ) : (
+                    <>🚀 Assign Task</>
+                  )}
                 </button>
               </div>
             </form>

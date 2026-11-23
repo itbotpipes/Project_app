@@ -13,11 +13,12 @@ import {
   Layers,
   Sparkles,
   Info,
+  Star,
 } from "lucide-react";
 import { cn } from "@/lib/cn";
 import { Card, Badge } from "../_components/ui";
 import TaskLink from "../_components/TaskLink";
-import type { EmployeeDailyWorkSummary, DailySummaryTaskItem } from "@/lib/dailyWorkSummaryService";
+import type { EmployeeDailyWorkSummary, DailySummaryTaskItem } from "@/lib/dailyWorkSummaryTypes";
 
 export default function DailySummaryTemplateCard({
   summary,
@@ -231,6 +232,35 @@ export default function DailySummaryTemplateCard({
         </div>
       </div>
 
+      {/* Quality Reward Points Banner (Requirement 7) */}
+      {(summary.totalApprovedPointsEarned ?? 0) > 0 && (
+        <div className="p-4 rounded-2xl border border-purple-200/90 bg-gradient-to-r from-purple-50/70 via-white to-purple-50/40 flex flex-wrap items-center justify-between gap-4 shadow-2xs">
+          <div className="flex items-center gap-3">
+            <div className="grid h-10 w-10 place-items-center rounded-xl bg-purple-600 text-white shadow-xs">
+              <Star size={20} />
+            </div>
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-purple-950 flex items-center gap-1.5">
+                Quality Reward Points Earned
+                <span className="text-[10px] font-normal text-purple-700 bg-purple-100 px-2 py-0.5 rounded-full">
+                  Separate from completion %
+                </span>
+              </div>
+              <div className="text-xs text-slate-600 mt-0.5">
+                Base Points: <strong className="text-slate-800">{summary.basePointsEarned ?? 0} pts</strong> (Size × Priority) + Manager Bonus: <strong className="text-purple-700">+{summary.qualityBonusPointsEarned ?? 0} pts</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="text-right">
+            <div className="text-2xl font-black text-purple-900">
+              {summary.totalApprovedPointsEarned} <span className="text-xs font-semibold text-purple-600">pts</span>
+            </div>
+            <div className="text-[10px] text-slate-400 font-medium">Official Approved Points</div>
+          </div>
+        </div>
+      )}
+
       {/* Work Summary Sections */}
       <div className="space-y-6 pt-2">
         {/* Completed Today */}
@@ -253,6 +283,12 @@ export default function DailySummaryTemplateCard({
                       {t.title}
                     </TaskLink>
                     <div className="flex items-center gap-1.5 text-xs">
+                      {t.totalApprovedPoints != null && (
+                        <span className="px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 text-[11px] font-semibold flex items-center gap-1">
+                          <Star size={11} className="text-purple-600" />
+                          {t.totalApprovedPoints} pts
+                        </span>
+                      )}
                       {t.kpiName && (
                         <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 text-[11px]">
                           {t.kpiName}

@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { v2 as cloudinary } from "cloudinary";
+import { sendNotification } from "@/lib/notificationService";
 
 // Configure Cloudinary
 cloudinary.config({
@@ -11,6 +12,38 @@ cloudinary.config({
   api_key: process.env.CLOUDINARY_API_KEY,
   api_secret: process.env.CLOUDINARY_API_SECRET,
 });
+
+export async function uploadFileBufferToCloudinary(file: File): Promise<{ secureUrl: string; kind: string; filename: string }> {
+  const bytes = Buffer.from(await file.arrayBuffer());
+  const isImage = file.type.startsWith("image/");
+  const isAudioVideo = file.type.startsWith("audio/") || file.type.startsWith("video/");
+  const resourceType = isImage ? "image" : isAudioVideo ? "video" : "raw";
+  const lastDot = file.name.lastIndexOf(".");
+  const fileExtension = lastDot !== -1 ? file.name.substring(lastDot) : "";
+  const uniqueId = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const publicId = `${uniqueId}${fileExtension}`;
+
+  const uploadResult = (await new Promise((resolve, reject) => {
+    const uploadStream = cloudinary.uploader.upload_stream(
+      {
+        folder: "taskflow_uploads",
+        resource_type: resourceType,
+        public_id: publicId,
+      },
+      (error, result) => {
+        if (error) reject(error);
+        else resolve(result);
+      }
+    );
+    uploadStream.end(bytes);
+  })) as any;
+
+  return {
+    secureUrl: uploadResult.secure_url,
+    kind: isImage ? "IMAGE" : "FILE",
+    filename: file.name || "upload",
+  };
+}
 
 export async function addComment(formData: FormData) {
   const user = await getCurrentUser();
@@ -42,7 +75,51 @@ export async function addComment(formData: FormData) {
 
   const authorDoc = await adminDb.collection("Employee").doc(user.id).get();
   const authorData = authorDoc.exists ? authorDoc.data() : null;
-  
+  const authorName = authorData?.name ?? user.name ?? "Colleague";
+
+  // Notify task assignee and creator about new comment
+  try {
+    const taskDoc = await adminDb.collection("Task").doc(taskId).get();
+    if (taskDoc.exists) {
+      const taskData = taskDoc.data()!;
+      const snippet = body.length > 70 ? `${body.slice(0, 70)}...` : body;
+
+      if (taskData.assigneeId && taskData.assigneeId !== user.id) {
+        await sendNotification({
+          recipientId: taskData.assigneeId,
+          actorId: user.id,
+          actorName: authorName,
+          taskId,
+          taskTitle: taskData.title || "Task",
+          type: "TASK_COMMENT",
+          title: "New Comment",
+          message: `${authorName}: "${snippet}"`,
+          href: `/task/${taskId}`,
+        });
+      }
+
+      if (
+        taskData.creatorId &&
+        taskData.creatorId !== user.id &&
+        taskData.creatorId !== taskData.assigneeId
+      ) {
+        await sendNotification({
+          recipientId: taskData.creatorId,
+          actorId: user.id,
+          actorName: authorName,
+          taskId,
+          taskTitle: taskData.title || "Task",
+          type: "TASK_COMMENT",
+          title: "New Comment",
+          message: `${authorName}: "${snippet}"`,
+          href: `/task/${taskId}`,
+        });
+      }
+    }
+  } catch (err) {
+    console.error("[addComment] Notification dispatch error:", err);
+  }
+
   revalidatePath(`/task/${taskId}`);
   return {
     ok: true,

@@ -220,5 +220,37 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
       alerts.push({ id: "score-escalation", tone: "red", href: "/scores", text: `⚠ ${pending} employee scorecard(s) for ${monthName} still not finalised across the company` });
   }
 
+  // ── Unread Task, Review & Comment Notifications ─────────────────────────
+  try {
+    const userNotifsSnap = await adminDb
+      .collection("Notification")
+      .where("recipientId", "==", user.id)
+      .where("read", "==", false)
+      .orderBy("createdAt", "desc")
+      .limit(10)
+      .get();
+
+    if (!userNotifsSnap.empty) {
+      for (const d of userNotifsSnap.docs) {
+        const nd = d.data();
+        const tone =
+          nd.type === "REVIEW_APPROVED"
+            ? "blue"
+            : nd.type === "REVIEW_REJECTED"
+            ? "red"
+            : "amber";
+        alerts.push({
+          id: `notif-${d.id}`,
+          tone,
+          href: nd.href || `/task/${nd.taskId}`,
+          text: `${nd.title}: ${nd.message || nd.taskTitle}`,
+        });
+      }
+    }
+  } catch (err) {
+    // Non-blocking fallback if composite index is provisioning
+    console.warn("[getAlerts] Notification fetch error:", err);
+  }
+
   return alerts;
 }

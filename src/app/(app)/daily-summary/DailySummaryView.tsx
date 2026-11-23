@@ -34,7 +34,7 @@ import type {
   CompanyDailyWorkSummariesResult,
   EmployeeDailyWorkSummary,
   DepartmentDailyWorkSummary,
-} from "@/lib/dailyWorkSummaryService";
+} from "@/lib/dailyWorkSummaryTypes";
 
 export default function DailySummaryView({
   data,

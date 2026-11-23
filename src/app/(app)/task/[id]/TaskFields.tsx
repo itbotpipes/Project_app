@@ -1,5 +1,8 @@
+"use client";
+
+import { useState, useMemo } from "react";
 import Link from "next/link";
-import { Target, Sparkles, CheckCircle2, AlertCircle, RotateCcw, Award } from "lucide-react";
+import { Target, Sparkles, CheckCircle2, AlertCircle, RotateCcw, Award, Maximize2, Eye } from "lucide-react";
 import { TASK_STATUS_LABEL } from "@/lib/constants";
 import { relativeTime } from "@/lib/date";
 import type { TaskDetailData } from "@/lib/taskDetail";
@@ -18,6 +21,7 @@ import QuickActions from "./QuickActions";
 import CommentItem from "./CommentItem";
 import TaskTimer from "./TaskTimer";
 import TaskScoreCard from "./TaskScoreCard";
+import ImagePreviewModal, { type PreviewImage } from "../../_components/ImagePreviewModal";
 
 const STATUS_DOT: Record<string, string> = {
   NEW: "bg-slate-400",
@@ -45,6 +49,26 @@ const ACTIVITY_LABEL: Record<string, string> = {
  * the same shape from `/api/tasks/[id]`), so both render identically.
  */
 export default function TaskFields({ data: task }: { data: NonNullable<TaskDetailData> }) {
+  const [previewImageIndex, setPreviewImageIndex] = useState<number | null>(null);
+
+  // Filter image attachments for modal preview
+  const imageAttachments = useMemo<PreviewImage[]>(() => {
+    return (task.attachments || [])
+      .filter((a: any) => a.kind === "PHOTO" || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(a.url || a.filename || ""))
+      .map((a: any) => ({
+        id: a.id,
+        url: a.url,
+        filename: a.filename || "Attachment",
+        uploadedAt: a.createdAt,
+      }));
+  }, [task.attachments]);
+
+  function openImagePreview(attachmentId: string) {
+    const idx = imageAttachments.findIndex((img) => img.id === attachmentId);
+    if (idx !== -1) {
+      setPreviewImageIndex(idx);
+    }
+  }
   return (
     <div className="space-y-5">
       <Card>
@@ -296,6 +320,16 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
         scoredAt={task.scoredAt}
         scoredByName={task.scoredByName}
         maxPoints={task.kpiPoints?.maxPoints ?? 5}
+        sizeLabel={task.sizeLabel}
+        priority={task.priority?.label ?? "Medium"}
+        urgent={task.urgent}
+        important={task.important}
+        qualityBonusPoints={(task as any).qualityBonusPoints}
+        qualityBonusReason={(task as any).qualityBonusReason}
+        basePoints={(task as any).basePoints}
+        priorityMultiplier={(task as any).priorityMultiplier}
+        totalApprovedPoints={(task as any).totalApprovedPoints}
+        taskStatus={task.status}
       />
 
       <Card>
@@ -332,11 +366,40 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
                         </details>
                       )}
                     </div>
-                  ) : a.kind === "PHOTO" || /\.(png|jpe?g|gif|webp)$/i.test(a.url) ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <a href={a.url} target="_blank" rel="noreferrer">
-                      <img src={a.url} alt={a.filename ?? "attachment"} className="max-h-48 rounded" />
-                    </a>
+                  ) : a.kind === "PHOTO" || /\.(png|jpe?g|gif|webp|svg|bmp)$/i.test(a.url || a.filename || "") ? (
+                    // Image attachment with modal preview (direct download removed/disabled)
+                    <div className="space-y-1.5">
+                      <button
+                        type="button"
+                        onClick={() => openImagePreview(a.id)}
+                        className="group relative block overflow-hidden rounded-lg border border-slate-200 bg-slate-100 hover:border-blue-400 transition cursor-pointer text-left"
+                        title="Click to preview image (downloads disabled)"
+                      >
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={a.url}
+                          alt={a.filename ?? "attachment"}
+                          draggable={false}
+                          onContextMenu={(e) => e.preventDefault()}
+                          className="max-h-48 rounded object-contain group-hover:scale-[1.02] transition-transform select-none"
+                        />
+                        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/15 transition flex items-center justify-center pointer-events-none">
+                          <span className="opacity-0 group-hover:opacity-100 bg-black/75 text-white text-[11px] font-medium px-2.5 py-1 rounded-md transition shadow-sm flex items-center gap-1.5">
+                            <Maximize2 size={12} /> Preview Image
+                          </span>
+                        </div>
+                      </button>
+                      <div className="flex items-center justify-between text-xs text-slate-500">
+                        <span className="truncate max-w-xs">{a.filename || "Attached Image"}</span>
+                        <button
+                          type="button"
+                          onClick={() => openImagePreview(a.id)}
+                          className="text-blue-600 hover:underline flex items-center gap-1 text-[11px] font-medium"
+                        >
+                          <Eye size={12} /> Preview
+                        </button>
+                      </div>
+                    </div>
                   ) : (
                     <a href={a.url} target="_blank" rel="noreferrer" className="text-sm text-blue-600 hover:underline truncate max-w-full">
                       📎 {a.filename ?? a.url}
@@ -349,6 +412,15 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
           </ul>
         )}
       </Card>
+
+      {/* Full-Screen Image Preview Modal */}
+      {previewImageIndex !== null && imageAttachments.length > 0 && (
+        <ImagePreviewModal
+          images={imageAttachments}
+          initialIndex={previewImageIndex}
+          onClose={() => setPreviewImageIndex(null)}
+        />
+      )}
 
       <Card className="scroll-mt-4" id="comment-box">
         <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide text-slate-500">Comments ({task.commentsCount ?? 0})</h2>

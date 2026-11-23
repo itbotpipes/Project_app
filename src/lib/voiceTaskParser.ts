@@ -7,6 +7,7 @@ export type VoiceParseResult = {
   kpiId?: string;
   sizeLabel?: "EASY" | "MEDIUM" | "DIFFICULT";
   summary: string[];
+  confidence?: number;
 };
 
 const MONTH_MAP: Record<string, number> = {

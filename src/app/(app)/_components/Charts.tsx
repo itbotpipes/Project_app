@@ -98,11 +98,11 @@ export function DualTrendLine({
         />
         <YAxis domain={[0, 100]} tick={{ fontSize: 12, fill: "#64748b" }} />
         <Tooltip
-          formatter={(value: any, name: string) => {
+          formatter={(value: any, name: any) => {
             if (value === null || value === undefined) return ["—", name];
             return [`${Math.round(Number(value))}/100`, name];
           }}
-          labelFormatter={(label: string, payload: any) => {
+          labelFormatter={(label: any, payload: any) => {
             const item = payload?.[0]?.payload;
             if (item?.isLive) {
               return `${item.month || label} (Live / In Progress — not finalized)`;

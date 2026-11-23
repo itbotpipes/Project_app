@@ -6,11 +6,31 @@ import { adminDb } from "@/lib/firebase/admin";
 import { loadEmployeePerformance } from "@/lib/employeePerformance";
 import SimplifiedPerformanceView from "../../_components/SimplifiedPerformanceView";
 
-export default async function EmployeePerformancePage({ params }: { params: Promise<{ id: string }> }) {
+export default async function EmployeePerformancePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ month?: string; date?: string }>;
+}) {
   const { id } = await params;
+  const sp = await searchParams;
   const user = await getCurrentUser();
   if (!user) return null;
   if (!hasPermission(user, "people")) redirect("/");
+
+  const rawMonth = sp.month || sp.date;
+  let targetDate: Date | undefined = undefined;
+  if (rawMonth) {
+    const parts = rawMonth.split("-");
+    if (parts.length >= 2) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1;
+      if (!isNaN(y) && !isNaN(m)) {
+        targetDate = new Date(y, m, 1);
+      }
+    }
+  }
 
   const empDoc = await adminDb.collection("Employee").doc(id).get();
   if (!empDoc.exists) notFound();
@@ -44,11 +64,14 @@ export default async function EmployeePerformancePage({ params }: { params: Prom
   const allowed = canScoreCompanyWide(user) || reportsToIds.includes(user.id) || employee.id === user.id;
   if (!allowed) redirect("/people");
 
-  const performanceData = await loadEmployeePerformance(id);
+  const performanceData = await loadEmployeePerformance(id, targetDate);
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <Link href="/people" className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800">
+      <Link
+        href={rawMonth ? `/people?month=${encodeURIComponent(rawMonth)}` : "/people"}
+        className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-800"
+      >
         <ArrowLeft size={15} /> Directory
       </Link>
 

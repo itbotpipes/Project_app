@@ -59,13 +59,14 @@ function toPlainObject<T>(val: T): T {
   return val;
 }
 
-export async function loadEmployeePerformance(employeeId: string) {
-  const now = new Date();
+export async function loadEmployeePerformance(employeeId: string, targetDate?: Date) {
+  const now = targetDate ? new Date(targetDate) : new Date();
   const nowYear = now.getFullYear();
   const nowMonth = now.getMonth() + 1;
-  const startOfMonth = monthStartOf(now);
+  const startOfMonth = new Date(nowYear, nowMonth - 1, 1);
+  const endOfMonth = new Date(nowYear, nowMonth, 0, 23, 59, 59, 999);
   const weekStart = mondayOf(now);
-  const minQueryDate = new Date(Math.min(startOfMonth.getTime(), weekStart.getTime()) - 30 * 86400000);
+  const minQueryDate = new Date(Math.min(startOfMonth.getTime(), weekStart.getTime()) - 365 * 86400000);
 
   const [cardsSnap, reviewSnap, behaviourSnap, targetsSnap, employeeDoc] = await Promise.all([
     adminDb.collection("MonthlyScorecard").where("employeeId", "==", employeeId).get(),
@@ -75,14 +76,22 @@ export async function loadEmployeePerformance(employeeId: string) {
     adminDb.collection("Employee").doc(employeeId).get(),
   ]);
 
-  const cards = cardsSnap.docs
+  const allCards = cardsSnap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as any)
     .sort((a, b) => (a.year - b.year) || (a.month - b.month));
+
+  // Filter scorecards up to the selected target year and month
+  const cards = allCards.filter(
+    (c) => c.year < nowYear || (c.year === nowYear && c.month <= nowMonth)
+  );
+
   const review = !reviewSnap.empty ? reviewSnap.docs[0].data() : null;
   const behaviourAll = behaviourSnap.docs
     .map((d) => d.data() as any)
     .sort((a, b) => (b.year - a.year) || (b.month - a.month));
 
+  // Build trend points for last 6 to 12 months up to the selected date
+  const trendSlice = cards.slice(-12);
   const trend: Array<{
     label: string;
     month: string;
@@ -91,14 +100,14 @@ export async function loadEmployeePerformance(employeeId: string) {
     manager: number | null;
     managerScore?: number;
     isLive?: boolean;
-  }> = cards.map((c) => ({
+  }> = trendSlice.map((c) => ({
     label: monthLabel(c.year, c.month),
     month: monthLabel(c.year, c.month),
     auto: c.autoTotal != null ? Math.round(c.autoTotal * 10) / 10 : null,
     autoScore: c.autoTotal != null ? Math.round(c.autoTotal * 10) / 10 : undefined,
     manager: c.total != null ? Math.round(c.total * 10) / 10 : null,
     managerScore: c.total != null ? Math.round(c.total * 10) / 10 : undefined,
-    isLive: false,
+    isLive: c.year === nowYear && c.month === nowMonth,
   }));
   const latestFinal = cards[cards.length - 1];
   const avg = recentAverage(cards);
@@ -473,6 +482,10 @@ export async function loadEmployeePerformance(employeeId: string) {
     weeklyKpiAnalytics,
     weeklyStats,
     monthlyStats,
+    selectedMonthValue: `${nowYear}-${String(nowMonth).padStart(2, "0")}`,
+    selectedMonthLabel: now.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
+    selectedYear: nowYear,
+    selectedMonth: nowMonth,
     completedTasks: {
       thisWeek: completedTasksThisWeek,
       thisMonth: completedTasksThisMonth,

@@ -13,6 +13,8 @@ export default function Attachments({ taskId }: { taskId: string }) {
   const [busy, setBusy] = useState(false);
   const [recording, setRecording] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState<string | null>(null);
+  const [progressMsg, setProgressMsg] = useState<string | null>(null);
   const [transcript, setTranscript] = useState("");
   const recorderRef = useRef<MediaRecorder | null>(null);
   const chunksRef = useRef<Blob[]>([]);
@@ -22,6 +24,7 @@ export default function Attachments({ taskId }: { taskId: string }) {
   async function send(file: File, kind: string, voiceTranscript?: string) {
     setBusy(true);
     setError(null);
+    setSuccess(null);
     const fd = new FormData();
     fd.set("taskId", taskId);
     fd.set("kind", kind);
@@ -31,22 +34,74 @@ export default function Attachments({ taskId }: { taskId: string }) {
     }
     const res = await uploadTaskAttachment(fd);
     setBusy(false);
-    if (res?.error) setError(res.error);
-    else if (res?.attachment && ctx?.setTaskData) {
-      ctx.setTaskData((prev) =>
-        prev
-          ? {
-              ...prev,
-              attachments: [res.attachment, ...prev.attachments],
-            }
-          : null
-      );
+    if (res?.error) {
+      setError(res.error);
+    } else if (res?.attachment) {
+      if (ctx?.setTaskData) {
+        ctx.setTaskData((prev) =>
+          prev
+            ? {
+                ...prev,
+                attachments: [res.attachment, ...prev.attachments],
+              }
+            : null
+        );
+      }
+      setSuccess("✓ Voice note attached successfully!");
+      router.refresh();
+      setTimeout(() => setSuccess(null), 3500);
     }
   }
 
   async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (f) await send(f, "FILE");
+    const fileList = e.target.files;
+    if (!fileList || fileList.length === 0) return;
+    
+    setBusy(true);
+    setError(null);
+    setSuccess(null);
+
+    const total = fileList.length;
+    let uploadedCount = 0;
+    const newAttachments: any[] = [];
+
+    for (let i = 0; i < total; i++) {
+      const file = fileList[i];
+      setProgressMsg(`Uploading ${i + 1} of ${total}: ${file.name}...`);
+
+      const fd = new FormData();
+      fd.set("taskId", taskId);
+      fd.set("kind", file.type.startsWith("image/") ? "IMAGE" : "FILE");
+      fd.set("file", file);
+
+      const res = await uploadTaskAttachment(fd);
+      if (res?.error) {
+        setError(`Failed to upload ${file.name}: ${res.error}`);
+      } else if (res?.attachment) {
+        uploadedCount++;
+        newAttachments.push(res.attachment);
+      }
+    }
+
+    if (newAttachments.length > 0 && ctx?.setTaskData) {
+      ctx.setTaskData((prev) =>
+        prev
+          ? {
+              ...prev,
+              attachments: [...newAttachments, ...prev.attachments],
+            }
+          : null
+      );
+    }
+
+    setBusy(false);
+    setProgressMsg(null);
+    if (uploadedCount > 0) {
+      setSuccess(`✓ Successfully uploaded ${uploadedCount} file${uploadedCount > 1 ? "s" : ""}!`);
+      router.refresh();
+      setTimeout(() => setSuccess(null), 4000);
+    }
+
     if (fileRef.current) fileRef.current.value = "";
   }
 
@@ -123,11 +178,19 @@ export default function Attachments({ taskId }: { taskId: string }) {
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={busy}
-          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-100 disabled:opacity-60"
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-300 px-3 py-1.5 text-sm font-medium text-slate-700 hover:bg-slate-100 disabled:opacity-60 transition-colors shadow-2xs"
         >
-          <Paperclip size={15} /> Attach file
+          {busy ? <Loader2 size={15} className="animate-spin text-blue-600" /> : <Paperclip size={15} className="text-slate-500" />}
+          {busy ? "Uploading..." : "Attach files"}
         </button>
-        <input ref={fileRef} type="file" onChange={onFile} className="hidden" />
+        <input
+          ref={fileRef}
+          type="file"
+          multiple
+          accept="image/*,application/pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.txt,.csv,.zip"
+          onChange={onFile}
+          className="hidden"
+        />
 
         {!recording ? (
           <button
@@ -149,7 +212,21 @@ export default function Attachments({ taskId }: { taskId: string }) {
           </button>
         )}
       </div>
-      {error && <p className="text-xs text-red-600">{error}</p>}
+      {progressMsg && (
+        <div className="flex items-center gap-2 text-xs font-medium text-blue-700 bg-blue-50 border border-blue-200/80 rounded-lg px-2.5 py-1.5 animate-pulse">
+          <Loader2 size={13} className="animate-spin" /> {progressMsg}
+        </div>
+      )}
+      {success && (
+        <p className="text-xs font-semibold text-emerald-600 bg-emerald-50 border border-emerald-200 rounded-lg px-2.5 py-1.5">
+          {success}
+        </p>
+      )}
+      {error && (
+        <p className="text-xs font-semibold text-rose-600 bg-rose-50 border border-rose-200 rounded-lg px-2.5 py-1.5">
+          ⚠️ {error}
+        </p>
+      )}
     </div>
   );
 }

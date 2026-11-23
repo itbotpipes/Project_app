@@ -346,7 +346,7 @@ export default function DirectoryView({
                         <Avatar name={e.name} url={e.avatarUrl} size={32} />
                         <div>
                           <Link
-                            href={`/people/${e.id}`}
+                            href={`/people/${e.id}?month=${encodeURIComponent(selectedMonthValue)}`}
                             className="font-semibold text-slate-900 hover:text-blue-600 hover:underline block"
                           >
                             {e.name}
@@ -468,7 +468,7 @@ export default function DirectoryView({
                           </button>
                         )}
                         <Link
-                          href={`/people/${e.id}`}
+                          href={`/people/${e.id}?month=${encodeURIComponent(selectedMonthValue)}`}
                           className="inline-flex items-center gap-0.5 text-xs font-medium text-blue-600 hover:text-blue-800 hover:underline"
                         >
                           <span>Trend</span>

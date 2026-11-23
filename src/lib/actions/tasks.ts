@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { FieldValue } from "firebase-admin/firestore";
+import { sendNotification } from "@/lib/notificationService";
+import { computeTaskPoints } from "@/lib/qualityPoints";
+import { uploadFileBufferToCloudinary } from "./attachments";
 
 export async function createTask(formData: FormData) {
   const user = await getCurrentUser();
@@ -120,6 +123,26 @@ export async function createTask(formData: FormData) {
         });
       });
       await batch.commit();
+    }
+
+    // Process file attachments added during task creation
+    const rawAttachments = formData.getAll("attachments");
+    for (const item of rawAttachments) {
+      if (item && typeof item === "object" && "size" in item && (item as File).size > 0) {
+        try {
+          const uploaded = await uploadFileBufferToCloudinary(item as File);
+          await adminDb.collection("Attachment").add({
+            taskId: taskRef.id,
+            kind: uploaded.kind,
+            url: uploaded.secureUrl,
+            filename: uploaded.filename,
+            createdAt: now,
+            transcript: null,
+          });
+        } catch (uploadErr) {
+          console.error("[createTask] Attachment upload error:", uploadErr);
+        }
+      }
     }
 
     await adminDb.collection("AuditLog").add({
@@ -293,6 +316,52 @@ export async function moveTask(formData: FormData) {
     createdAt: new Date(),
   });
 
+  // Review & task status notification dispatch
+  try {
+    if (status === "REOPENED" && task.assigneeId) {
+      await sendNotification({
+        recipientId: task.assigneeId,
+        actorId: user.id,
+        actorName: user.name || "Manager",
+        taskId,
+        taskTitle: task.title,
+        type: "REVIEW_REJECTED",
+        title: "Task Rework Required",
+        message: `${user.name || "Manager"}: "${rejectionReason || "Please make corrections"}"`,
+        href: `/task/${taskId}`,
+      });
+    } else if (status === "PENDING_REVIEW") {
+      const targetReviewerId = task.reviewerId || task.creatorId;
+      if (targetReviewerId && targetReviewerId !== user.id) {
+        await sendNotification({
+          recipientId: targetReviewerId,
+          actorId: user.id,
+          actorName: user.name || "Team Member",
+          taskId,
+          taskTitle: task.title,
+          type: "REVIEW_REQUESTED",
+          title: "Ready for Review",
+          message: `${user.name || "Colleague"} submitted "${task.title}" for review.`,
+          href: `/task/${taskId}`,
+        });
+      }
+    } else if (status === "CLOSED" && task.assigneeId && task.assigneeId !== user.id) {
+      await sendNotification({
+        recipientId: task.assigneeId,
+        actorId: user.id,
+        actorName: user.name || "Manager",
+        taskId,
+        taskTitle: task.title,
+        type: "REVIEW_APPROVED",
+        title: "Task Approved & Closed",
+        message: `${user.name || "Manager"} approved and closed "${task.title}".`,
+        href: `/task/${taskId}`,
+      });
+    }
+  } catch (notifErr) {
+    console.error("[moveTask] Notification error:", notifErr);
+  }
+
   revalidatePath("/board");
   revalidatePath("/team");
   revalidatePath("/delegated");
@@ -445,10 +514,34 @@ export async function scoreTask(formData: FormData) {
     return { error: "You can only score this task if you are in the loop or assigned as the reviewer." };
   }
 
+  const rawQualityBonus = formData.get("qualityBonusPoints");
+  const qualityBonusPoints =
+    rawQualityBonus != null && rawQualityBonus !== ""
+      ? Math.max(0, Math.min(50, Math.round(Number(rawQualityBonus))))
+      : 0;
+  const qualityBonusReason = String(formData.get("qualityBonusReason") || "").trim() || null;
+
+  // Compute quality-based reward points breakdown
+  const points = computeTaskPoints({
+    sizeLabel: task.sizeLabel,
+    priority: task.priority,
+    urgent: task.urgent,
+    important: task.important,
+    qualityBonusPoints,
+  });
+
   const now = new Date();
   const updateData: Record<string, any> = {
     managerScore: score,
     scoreFeedback: feedback,
+    qualityBonusPoints: points.qualityBonus,
+    qualityBonusReason,
+    basePoints: points.basePoints,
+    priorityMultiplier: points.multiplier,
+    totalApprovedPoints: points.totalPoints,
+    pointsApprovedAt: now,
+    pointsApprovedById: user.id,
+    pointsApprovedByName: user.name || "Manager",
     scoredAt: now,
     scoredById: user.id,
     scoredByName: user.name || "Manager",
@@ -468,9 +561,31 @@ export async function scoreTask(formData: FormData) {
     action: "task.score",
     entity: "Task",
     entityId: taskId,
-    detail: `Scored ${score}% (${feedback ? `"${feedback}"` : "no feedback"}) by ${user.name}${autoClose ? " (Approved & Closed)" : ""}`,
+    detail: `Scored ${score}% (${feedback ? `"${feedback}"` : "no feedback"}) + ${points.qualityBonus} bonus pts by ${user.name}${autoClose ? " (Approved & Closed)" : ""}`,
     createdAt: now,
   });
+
+  // Review notification dispatch
+  if (task.assigneeId && task.assigneeId !== user.id) {
+    try {
+      const isApproved = autoClose || score >= 70;
+      await sendNotification({
+        recipientId: task.assigneeId,
+        actorId: user.id,
+        actorName: user.name || "Manager",
+        taskId,
+        taskTitle: task.title,
+        type: isApproved ? "REVIEW_APPROVED" : "REVIEW_FEEDBACK",
+        title: isApproved ? `Task Approved & Scored (${score}%)` : `Review Feedback (${score}%)`,
+        message: `${user.name || "Manager"} evaluated "${task.title}". ${
+          points.qualityBonus > 0 ? `Awarded +${points.qualityBonus} Quality Bonus Points! ` : ""
+        }${feedback ? `"${feedback}"` : ""}`,
+        href: `/task/${taskId}`,
+      });
+    } catch (notifErr) {
+      console.error("[scoreTask] Notification error:", notifErr);
+    }
+  }
 
   revalidatePath(`/task/${taskId}`);
   revalidatePath("/board");

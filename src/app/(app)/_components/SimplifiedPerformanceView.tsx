@@ -2,9 +2,11 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter, usePathname, useSearchParams } from "next/navigation";
 import {
   ChevronDown,
   ChevronRight,
+  ChevronLeft,
   CheckCircle2,
   AlertTriangle,
   Clock,
@@ -121,6 +123,10 @@ type SimplifiedPerformanceProps = {
       thisMonth: CompletedTaskItem[];
       all: CompletedTaskItem[];
     };
+    selectedMonthValue?: string;
+    selectedMonthLabel?: string;
+    selectedYear?: number;
+    selectedMonth?: number;
   };
   isManagerOrAdmin?: boolean;
 };
@@ -168,6 +174,37 @@ export default function SimplifiedPerformanceView({
 
   // View mode filter: Monthly vs. Weekly
   const [timeframe, setTimeframe] = useState<"monthly" | "weekly">("monthly");
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
+
+  const selectedMonthVal =
+    performanceData.selectedMonthValue ||
+    (() => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    })();
+
+  const selectedMonthLbl = performanceData.selectedMonthLabel || "Current Month";
+
+  function handleMonthChange(newMonthVal: string) {
+    if (!newMonthVal) return;
+    const current = new URLSearchParams(Array.from(searchParams?.entries() || []));
+    current.set("month", newMonthVal);
+    router.push(`${pathname}?${current.toString()}`);
+  }
+
+  function shiftMonth(offset: number) {
+    const parts = selectedMonthVal.split("-");
+    if (parts.length >= 2) {
+      const y = parseInt(parts[0], 10);
+      const m = parseInt(parts[1], 10) - 1 + offset;
+      const d = new Date(y, m, 1);
+      const newMonthStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+      handleMonthChange(newMonthStr);
+    }
+  }
 
   // Completed tasks filter controls
   const [taskScope, setTaskScope] = useState<"current" | "thisWeek" | "thisMonth" | "all">("current");
@@ -284,11 +321,48 @@ export default function SimplifiedPerformanceView({
           </button>
         </div>
 
-        <div className="flex items-center gap-2 text-xs text-slate-500">
-          <span className="hidden sm:inline">Viewing:</span>
-          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
-            {timeframe === "weekly" ? "⚡ Current Week (Mon–Sun)" : "📅 Current Month Live & 6-Month Review"}
-          </span>
+        {/* Month Selector & Date Navigator (Directory -> Trend) */}
+        <div className="flex flex-wrap items-center gap-2">
+          {timeframe === "monthly" && (
+            <div className="flex items-center rounded-xl border border-slate-200 bg-white p-1 shadow-2xs">
+              <button
+                type="button"
+                onClick={() => shiftMonth(-1)}
+                className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                title="Previous Month"
+              >
+                <ChevronLeft size={15} />
+              </button>
+
+              <div className="flex items-center gap-1.5 px-2">
+                <Calendar size={13} className="text-slate-400 shrink-0" />
+                <input
+                  type="month"
+                  value={selectedMonthVal}
+                  onChange={(e) => e.target.value && handleMonthChange(e.target.value)}
+                  className="text-xs font-semibold text-slate-800 bg-transparent border-none cursor-pointer focus:outline-hidden"
+                  title="Select month and year"
+                />
+              </div>
+
+              <button
+                type="button"
+                onClick={() => shiftMonth(1)}
+                className="rounded-lg p-1.5 text-slate-600 hover:bg-slate-100 transition cursor-pointer"
+                title="Next Month"
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          )}
+
+          <div className="flex items-center gap-2 text-xs text-slate-500">
+            <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 font-medium text-slate-700">
+              {timeframe === "weekly"
+                ? "⚡ Current Week (Mon–Sun)"
+                : `📅 Period: ${selectedMonthLbl}`}
+            </span>
+          </div>
         </div>
       </div>
 
