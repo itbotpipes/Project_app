@@ -226,13 +226,20 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
       .collection("Notification")
       .where("recipientId", "==", user.id)
       .where("read", "==", false)
-      .orderBy("createdAt", "desc")
-      .limit(10)
+      .limit(30)
       .get();
 
     if (!userNotifsSnap.empty) {
-      for (const d of userNotifsSnap.docs) {
-        const nd = d.data();
+      const items = userNotifsSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .sort((a: any, b: any) => {
+          const tA = a.createdAt?.toDate ? a.createdAt.toDate().getTime() : new Date(a.createdAt || 0).getTime();
+          const tB = b.createdAt?.toDate ? b.createdAt.toDate().getTime() : new Date(b.createdAt || 0).getTime();
+          return tB - tA;
+        })
+        .slice(0, 10);
+
+      for (const nd of items as any[]) {
         const tone =
           nd.type === "REVIEW_APPROVED"
             ? "blue"
@@ -240,7 +247,7 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
             ? "red"
             : "amber";
         alerts.push({
-          id: `notif-${d.id}`,
+          id: `notif-${nd.id}`,
           tone,
           href: nd.href || `/task/${nd.taskId}`,
           text: `${nd.title}: ${nd.message || nd.taskTitle}`,
@@ -248,7 +255,6 @@ export async function getAlerts(user: UserLike): Promise<Alert[]> {
       }
     }
   } catch (err) {
-    // Non-blocking fallback if composite index is provisioning
     console.warn("[getAlerts] Notification fetch error:", err);
   }
 

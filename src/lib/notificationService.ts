@@ -50,19 +50,23 @@ export async function sendNotification(params: {
   const now = new Date();
   const oneMinuteAgo = new Date(now.getTime() - 60 * 1000);
 
-  // Check for recent duplicate within 1 minute
+  // Check for recent duplicate within 1 minute (in-memory to avoid composite index requirements)
   try {
-    const recentDuplicate = await adminDb
+    const recentSnap = await adminDb
       .collection("Notification")
       .where("recipientId", "==", recipientId)
       .where("taskId", "==", taskId)
-      .where("type", "==", type)
-      .where("createdAt", ">=", oneMinuteAgo)
-      .limit(1)
+      .limit(5)
       .get();
 
-    if (!recentDuplicate.empty) {
-      return recentDuplicate.docs[0].id;
+    const isDuplicate = recentSnap.docs.some((doc) => {
+      const d = doc.data();
+      const created = d.createdAt?.toDate ? d.createdAt.toDate() : new Date(d.createdAt || 0);
+      return d.type === type && created >= oneMinuteAgo;
+    });
+
+    if (isDuplicate) {
+      return null;
     }
 
     const href = params.href || `/task/${taskId}`;
@@ -99,11 +103,10 @@ export async function getUnreadNotifications(userId: string, limitCount = 20): P
       .collection("Notification")
       .where("recipientId", "==", userId)
       .where("read", "==", false)
-      .orderBy("createdAt", "desc")
-      .limit(limitCount)
+      .limit(50)
       .get();
 
-    return snap.docs.map((doc) => {
+    const items = snap.docs.map((doc) => {
       const data = doc.data();
       return {
         id: doc.id,
@@ -121,6 +124,10 @@ export async function getUnreadNotifications(userId: string, limitCount = 20): P
         createdAt: data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now()),
       };
     });
+
+    return items
+      .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime())
+      .slice(0, limitCount);
   } catch (err) {
     console.error("[getUnreadNotifications] Error:", err);
     return [];

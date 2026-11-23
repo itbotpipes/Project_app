@@ -13,25 +13,29 @@ export async function GET() {
       .collection("Notification")
       .where("recipientId", "==", user.id)
       .where("read", "==", false)
-      .orderBy("createdAt", "desc")
-      .limit(10)
+      .limit(30)
       .get();
 
-    const notifications = snap.docs.map((d) => {
-      const data = d.data();
-      return {
-        id: d.id,
-        taskId: data.taskId,
-        taskTitle: data.taskTitle,
-        type: data.type,
-        title: data.title,
-        message: data.message,
-        actorName: data.actorName,
-        href: data.href || `/task/${data.taskId}`,
-        notified: Boolean(data.notified),
-        createdAt: data.createdAt?.toDate ? data.createdAt.toDate().toISOString() : new Date().toISOString(),
-      };
-    });
+    const notifications = snap.docs
+      .map((d) => {
+        const data = d.data();
+        const dateObj = data.createdAt?.toDate ? data.createdAt.toDate() : new Date(data.createdAt || Date.now());
+        return {
+          id: d.id,
+          taskId: data.taskId,
+          taskTitle: data.taskTitle,
+          type: data.type,
+          title: data.title,
+          message: data.message,
+          actorName: data.actorName,
+          href: data.href || `/task/${data.taskId}`,
+          notified: Boolean(data.notified),
+          createdAt: dateObj.toISOString(),
+          timeMs: dateObj.getTime(),
+        };
+      })
+      .sort((a, b) => b.timeMs - a.timeMs)
+      .slice(0, 10);
 
     return NextResponse.json({ notifications });
   } catch (err) {
