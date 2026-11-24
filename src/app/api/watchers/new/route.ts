@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 
+export const dynamic = "force-dynamic";
+
 // New "In Loop" watcher rows for the current user that haven't popped a
 // notification yet. Marking `notified` happens client-side on dismiss (same
 // pattern as /api/reminders/due), so the toast can keep showing until seen.

@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 
+export const dynamic = "force-dynamic";
+
 function toDate(val: any): Date | null {
   if (!val) return null;
   if (val.toDate) return val.toDate();

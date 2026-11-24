@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { runEndOfDayProcess } from "@/lib/dailyWorkSummaryService";
 
+export const dynamic = "force-dynamic";
+
 export async function GET(req: NextRequest) {
   return handleCron(req);
 }
