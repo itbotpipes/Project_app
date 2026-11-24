@@ -29,7 +29,83 @@ export type BoardTask = {
   checklistTotal?: number;
   checklistDone?: number;
   managerScore?: number | null;
+  concernedContact?: string | null;
+  rejectionReason?: string | null;
 };
+
+export function getTaskVisuals(task: {
+  status: string;
+  dueAt: string | Date | null;
+  reworkCount?: number;
+  carryCount?: number;
+}, now: number) {
+  const isClosed = task.status === "CLOSED";
+  const isOnHold = task.status === "ON_HOLD";
+  const isPendingReview = task.status === "PENDING_REVIEW";
+  const isRework = task.status === "REOPENED" || (task.reworkCount != null && task.reworkCount > 0);
+
+  let delayState: "overdue" | "slightly_delayed" | "due_soon" | null = null;
+  let overdueDays = 0;
+
+  if (!isClosed && task.dueAt && now > 0) {
+    const dueTime = typeof task.dueAt === "string" ? new Date(task.dueAt).getTime() : task.dueAt.getTime();
+    if (!isNaN(dueTime)) {
+      const diffMs = dueTime - now;
+      const diffHours = diffMs / (1000 * 60 * 60);
+
+      if (diffHours < -24) {
+        delayState = "overdue";
+        overdueDays = Math.max(1, Math.floor(Math.abs(diffHours) / 24));
+      } else if (diffHours < 0) {
+        delayState = "slightly_delayed";
+      } else if (diffHours <= 4) {
+        delayState = "due_soon";
+      }
+    }
+  }
+
+  // Determine card styles and left accent border
+  let cardStyles = "border-slate-200 bg-white hover:border-slate-300";
+  let borderLeft = "border-l-4 border-l-slate-300";
+
+  if (isClosed) {
+    cardStyles = "border-slate-200 bg-slate-50/70";
+    borderLeft = "border-l-4 border-l-emerald-500";
+  } else if (delayState === "overdue") {
+    cardStyles = "border-rose-300 bg-rose-50/40 shadow-sm shadow-rose-100/50";
+    borderLeft = "border-l-4 border-l-rose-500";
+  } else if (delayState === "slightly_delayed") {
+    cardStyles = "border-amber-300 bg-amber-50/50 shadow-sm shadow-amber-100/50";
+    borderLeft = "border-l-4 border-l-amber-500";
+  } else if (isRework) {
+    cardStyles = "border-orange-300 bg-orange-50/40 shadow-sm shadow-orange-100/50";
+    borderLeft = "border-l-4 border-l-orange-500";
+  } else if (isOnHold) {
+    cardStyles = "border-amber-200 bg-amber-50/30";
+    borderLeft = "border-l-4 border-l-amber-400";
+  } else if (isPendingReview) {
+    cardStyles = "border-violet-200 bg-violet-50/30";
+    borderLeft = "border-l-4 border-l-violet-500";
+  } else if (delayState === "due_soon") {
+    cardStyles = "border-yellow-200 bg-yellow-50/30";
+    borderLeft = "border-l-4 border-l-yellow-400";
+  } else {
+    const colLeftColor: Record<string, string> = {
+      NEW: "border-l-slate-400",
+      ACCEPTED: "border-l-sky-400",
+      IN_PROGRESS: "border-l-blue-500",
+    };
+    borderLeft = `border-l-4 ${colLeftColor[task.status] || "border-l-slate-300"}`;
+  }
+
+  return {
+    delayState,
+    overdueDays,
+    isRework,
+    cardStyles,
+    borderLeft,
+  };
+}
 
 const COLUMN_TINT: Record<string, string> = {
   NEW: "bg-slate-400",
@@ -95,9 +171,11 @@ export default function KanbanBoard({
   const [holdError, setHoldError] = useState("");
   // Error toast state
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+  const [now, setNow] = useState<number>(0);
 
   useEffect(() => {
     setTasks(initialTasks);
+    setNow(Date.now());
   }, [initialTasks]);
 
   function colOf(status: string) {
@@ -218,6 +296,7 @@ export default function KanbanBoard({
           >
             {grouped[status].map((task) => {
               const quad = priorityQuadrant(task.urgent, task.important);
+              const visuals = getTaskVisuals(task, now);
               return (
                 <div
                   key={task.id}
@@ -232,7 +311,9 @@ export default function KanbanBoard({
                     setOverCol(null);
                   }}
                   className={cn(
-                    "cursor-grab rounded-xl border border-slate-200 bg-white p-3 shadow-sm active:cursor-grabbing",
+                    "cursor-grab rounded-xl border p-3 shadow-sm transition-all active:cursor-grabbing",
+                    visuals.cardStyles,
+                    visuals.borderLeft,
                     dragId === task.id && "opacity-50",
                   )}
                 >
@@ -260,8 +341,40 @@ export default function KanbanBoard({
                     </button>
                   </div>
 
-                  <div className="mt-2 flex flex-wrap gap-1.5">
+                  <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <span className={cn("rounded-full px-2 py-0.5 text-xs font-medium", quadTone[quad])}>{quad}</span>
+
+                    {/* Delay & Urgency Badges */}
+                    {visuals.delayState === "overdue" && (
+                      <span className="rounded-full bg-rose-100 border border-rose-300 px-2 py-0.5 text-xs font-semibold text-rose-800 inline-flex items-center gap-1 shadow-xs">
+                        🚨 Delayed ({visuals.overdueDays}d)
+                      </span>
+                    )}
+                    {visuals.delayState === "slightly_delayed" && (
+                      <span className="rounded-full bg-amber-100 border border-amber-300 px-2 py-0.5 text-xs font-semibold text-amber-800 inline-flex items-center gap-1 shadow-xs">
+                        ⚠️ Slightly Delayed
+                      </span>
+                    )}
+                    {visuals.delayState === "due_soon" && (
+                      <span className="rounded-full bg-yellow-100 border border-yellow-300 px-2 py-0.5 text-xs font-medium text-yellow-800 inline-flex items-center gap-1">
+                        ⏰ Due Soon
+                      </span>
+                    )}
+
+                    {/* Rework Badge */}
+                    {visuals.isRework && (
+                      <span className="rounded-full bg-orange-100 border border-orange-300 px-2 py-0.5 text-xs font-semibold text-orange-800 inline-flex items-center gap-1">
+                        ↩️ Rework{task.reworkCount > 0 ? ` (${task.reworkCount}×)` : ""}
+                      </span>
+                    )}
+
+                    {/* Status Badge */}
+                    {task.status === "PENDING_REVIEW" && (
+                      <span className="rounded-full bg-violet-100 border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-800">
+                        👀 Under Review
+                      </span>
+                    )}
+
                     {task.kpiName && (
                       <span className="rounded-full bg-violet-100 px-2 py-0.5 text-xs font-medium text-violet-700">
                         {task.kpiName}
@@ -290,11 +403,6 @@ export default function KanbanBoard({
                         ↻ carried {task.carryCount}×
                       </span>
                     )}
-                    {task.reworkCount > 0 && (
-                      <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-medium text-red-700">
-                        ↩ reworked {task.reworkCount}×
-                      </span>
-                    )}
                     {task.delegatedBy && (
                       <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-xs font-medium text-indigo-700">
                         ↪ {task.delegatedBy}
@@ -314,15 +422,26 @@ export default function KanbanBoard({
                     )}
                   </div>
 
-                  <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+                  <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
                     {task.projectName && <span>📁 {task.projectName}</span>}
                     {task.estimatedMins != null && <span>⏱ {task.estimatedMins}m</span>}
                     {task.dueAt && <span>📅 {fmtDate(task.dueAt)}</span>}
+                    {task.concernedContact && (
+                      <span className="font-medium text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[11px] inline-flex items-center gap-1">
+                        👤 Contact: {task.concernedContact}
+                      </span>
+                    )}
                   </div>
 
                   {task.status === "ON_HOLD" && task.holdReason && (
-                    <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
-                      On hold: {task.holdReason}
+                    <div className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-2 py-1 text-[11px] text-amber-800">
+                      <span className="font-medium">On hold:</span> {task.holdReason}
+                    </div>
+                  )}
+
+                  {task.rejectionReason && task.status !== "CLOSED" && (
+                    <div className="mt-2 rounded-md bg-rose-50 border border-rose-200 px-2 py-1 text-[11px] text-rose-800">
+                      <span className="font-semibold">Rejection note:</span> {task.rejectionReason}
                     </div>
                   )}
 

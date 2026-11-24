@@ -1,7 +1,9 @@
 import { Badge } from "../_components/ui";
 import { priorityQuadrant } from "@/lib/constants";
+import { cn } from "@/lib/cn";
 import MoveControl from "./MoveControl";
 import TaskLink from "../_components/TaskLink";
+import { getTaskVisuals } from "./KanbanBoard";
 
 type TaskLike = {
   id: string;
@@ -11,10 +13,13 @@ type TaskLike = {
   urgent: boolean;
   important: boolean;
   estimatedMins: number | null;
-  dueAt: Date | null;
+  dueAt: Date | string | null;
   holdReason: string | null;
   reviewRequired: boolean;
   carryCount: number;
+  reworkCount?: number;
+  concernedContact?: string | null;
+  rejectionReason?: string | null;
   kpiTemplate: { kpiName: string } | null;
   kpiPoints?: { earnedPoints: number; maxPoints: number } | null;
   project: { name: string } | null;
@@ -32,9 +37,10 @@ const quadTone: Record<string, string> = {
 };
 
 const MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-function fmtDate(d: Date | null): string | null {
+function fmtDate(d: Date | string | null): string | null {
   if (!d) return null;
-  return `${d.getDate()} ${MONTHS[d.getMonth()]} ${d.getFullYear()}`;
+  const date = typeof d === "string" ? new Date(d) : d;
+  return `${date.getDate()} ${MONTHS[date.getMonth()]} ${date.getFullYear()}`;
 }
 
 export default function TaskCard({
@@ -48,8 +54,10 @@ export default function TaskCard({
   delegatedBy?: string | null;
 }) {
   const quad = priorityQuadrant(task.urgent, task.important);
+  const visuals = getTaskVisuals(task, Date.now());
+
   return (
-    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+    <div className={cn("rounded-xl border p-3 shadow-sm transition-all", visuals.cardStyles, visuals.borderLeft)}>
       <TaskLink
         taskId={task.id}
         className="text-sm font-medium leading-snug text-slate-900 hover:text-blue-600 hover:underline"
@@ -57,8 +65,40 @@ export default function TaskCard({
         {task.title}
       </TaskLink>
 
-      <div className="mt-2 flex flex-wrap gap-1.5">
+      <div className="mt-2 flex flex-wrap items-center gap-1.5">
         <Badge className={quadTone[quad]}>{quad}</Badge>
+
+        {/* Delay & Urgency Badges */}
+        {visuals.delayState === "overdue" && (
+          <span className="rounded-full bg-rose-100 border border-rose-300 px-2 py-0.5 text-xs font-semibold text-rose-800 inline-flex items-center gap-1 shadow-xs">
+            🚨 Delayed ({visuals.overdueDays}d)
+          </span>
+        )}
+        {visuals.delayState === "slightly_delayed" && (
+          <span className="rounded-full bg-amber-100 border border-amber-300 px-2 py-0.5 text-xs font-semibold text-amber-800 inline-flex items-center gap-1 shadow-xs">
+            ⚠️ Slightly Delayed
+          </span>
+        )}
+        {visuals.delayState === "due_soon" && (
+          <span className="rounded-full bg-yellow-100 border border-yellow-300 px-2 py-0.5 text-xs font-medium text-yellow-800 inline-flex items-center gap-1">
+            ⏰ Due Soon
+          </span>
+        )}
+
+        {/* Rework Badge */}
+        {visuals.isRework && (
+          <span className="rounded-full bg-orange-100 border border-orange-300 px-2 py-0.5 text-xs font-semibold text-orange-800 inline-flex items-center gap-1">
+            ↩️ Rework{task.reworkCount ? ` (${task.reworkCount}×)` : ""}
+          </span>
+        )}
+
+        {/* Status Badge */}
+        {task.status === "PENDING_REVIEW" && (
+          <span className="rounded-full bg-violet-100 border border-violet-200 px-2 py-0.5 text-xs font-semibold text-violet-800">
+            👀 Under Review
+          </span>
+        )}
+
         {task.kpiTemplate && (
           <Badge className="bg-violet-100 text-violet-700">{task.kpiTemplate.kpiName}</Badge>
         )}
@@ -90,16 +130,27 @@ export default function TaskCard({
         )}
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
+      <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-500">
         {task.project && <span>📁 {task.project.name}</span>}
         {task.estimatedMins != null && <span>⏱ {task.estimatedMins}m</span>}
         {task.dueAt && <span>📅 {fmtDate(task.dueAt)}</span>}
+        {task.concernedContact && (
+          <span className="font-medium text-slate-700 bg-slate-100 border border-slate-200 px-1.5 py-0.5 rounded text-[11px] inline-flex items-center gap-1">
+            👤 Contact: {task.concernedContact}
+          </span>
+        )}
         {showAssignee && task.assignee && <span>👤 {task.assignee.name}</span>}
       </div>
 
       {task.status === "ON_HOLD" && task.holdReason && (
-        <div className="mt-2 rounded-md bg-amber-50 px-2 py-1 text-[11px] text-amber-700">
-          On hold: {task.holdReason}
+        <div className="mt-2 rounded-md bg-amber-50 border border-amber-200 px-2 py-1 text-[11px] text-amber-800">
+          <span className="font-medium">On hold:</span> {task.holdReason}
+        </div>
+      )}
+
+      {task.rejectionReason && task.status !== "CLOSED" && (
+        <div className="mt-2 rounded-md bg-rose-50 border border-rose-200 px-2 py-1 text-[11px] text-rose-800">
+          <span className="font-semibold">Rejection note:</span> {task.rejectionReason}
         </div>
       )}
 
