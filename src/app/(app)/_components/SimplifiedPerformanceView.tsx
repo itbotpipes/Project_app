@@ -127,6 +127,8 @@ type SimplifiedPerformanceProps = {
     selectedMonthLabel?: string;
     selectedYear?: number;
     selectedMonth?: number;
+    targetMonthCard?: any;
+    isCurrentCalendarMonth?: boolean;
   };
   isManagerOrAdmin?: boolean;
 };
@@ -170,6 +172,8 @@ export default function SimplifiedPerformanceView({
     weeklyStats,
     monthlyStats,
     completedTasks,
+    targetMonthCard,
+    isCurrentCalendarMonth = true,
   } = performanceData;
 
   // View mode filter: Monthly vs. Weekly
@@ -231,6 +235,16 @@ export default function SimplifiedPerformanceView({
   const totalEarned = liveMeta?.earnedPoints ?? activeAnalytics?.totalPointsEarned ?? 0;
   const totalPossible = liveMeta?.possiblePoints ?? ((activeAnalytics?.totalPointsMax && activeAnalytics.totalPointsMax > 0) ? activeAnalytics.totalPointsMax : 100);
   const liveScore = liveMeta?.scorePct ?? (totalPossible > 0 ? Math.max(0, Math.min(100, Math.round((totalEarned / totalPossible) * 1000) / 10)) : 0);
+
+  // For current calendar month, liveScore is always the live real-time score.
+  // For historical months:
+  // - If a scorecard exists with a score, prefer the scorecard score (or if 0 and liveScore > 0, liveScore from actual tasks in that month).
+  // - If no scorecard exists, use the computed liveScore for that month.
+  const displayScore = isCurrentCalendarMonth
+    ? liveScore
+    : (targetMonthCard && targetMonthCard.total != null
+        ? (targetMonthCard.total === 0 && liveScore > 0 ? liveScore : targetMonthCard.total)
+        : (targetMonthCard?.autoTotal != null ? targetMonthCard.autoTotal : liveScore));
 
   // Sort KPI buckets: Active/worked KPIs first, then by weightage
   const sortedBuckets = activeAnalytics
@@ -456,21 +470,35 @@ export default function SimplifiedPerformanceView({
       ) : (
         /* MONTHLY SUMMARY CARDS */
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-          {/* Card 1: Current Performance */}
+          {/* Card 1: Performance Score */}
           <div className="relative rounded-2xl border border-blue-100 bg-gradient-to-br from-blue-50/70 to-white p-4 shadow-xs">
             <div className="flex items-center justify-between">
               <span className="text-xs font-semibold uppercase tracking-wider text-blue-700">
-                Current Performance
+                {isCurrentCalendarMonth ? "Current Performance" : `${selectedMonthLbl} Performance`}
               </span>
-              <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
-                <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
-                Live this month
-              </span>
+              {isCurrentCalendarMonth ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-blue-600" />
+                  Live this month
+                </span>
+              ) : targetMonthCard && targetMonthCard.source !== "auto" && targetMonthCard.total != null ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-violet-100 px-2 py-0.5 text-[10px] font-medium text-violet-800">
+                  Finalized Score
+                </span>
+              ) : targetMonthCard && targetMonthCard.total != null ? (
+                <span className="inline-flex items-center gap-1 rounded-full bg-blue-100 px-2 py-0.5 text-[10px] font-medium text-blue-800">
+                  Monthly Scorecard
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-medium text-slate-700">
+                  Calculated Score
+                </span>
+              )}
             </div>
 
             <div className="mt-2 flex items-baseline gap-1.5">
               <span className="text-2xl font-bold tracking-tight text-blue-900">
-                {liveScore.toFixed(1)}
+                {displayScore.toFixed(1)}
               </span>
               <span className="text-xs font-medium text-blue-600">/ 100</span>
             </div>
@@ -574,12 +602,14 @@ export default function SimplifiedPerformanceView({
           <div className="flex items-center justify-between">
             <div>
               <SectionTitle>
-                {timeframe === "weekly" ? "Weekly KPI Breakdown" : "Where your score comes from"}
+                {timeframe === "weekly" ? "Weekly KPI Breakdown" : isCurrentCalendarMonth ? "Where your score comes from" : `${selectedMonthLbl} KPI Breakdown`}
               </SectionTitle>
               <p className="text-xs text-slate-500">
                 {timeframe === "weekly"
                   ? "KPI weightage & performance points earned this week. Click any row to expand."
-                  : "Current month KPI breakdown by weightage. Click any row to view its exact formula components."}
+                  : isCurrentCalendarMonth
+                  ? "Current month KPI breakdown by weightage. Click any row to view its exact formula components."
+                  : `KPI breakdown and performance points for ${selectedMonthLbl}. Click any row to view details.`}
               </p>
             </div>
             <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-xs font-medium text-slate-600">
@@ -886,7 +916,7 @@ export default function SimplifiedPerformanceView({
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              This Month ({completedTasks?.thisMonth?.length ?? 0})
+              {isCurrentCalendarMonth ? "This Month" : selectedMonthLbl} ({completedTasks?.thisMonth?.length ?? 0})
             </button>
             <button
               type="button"

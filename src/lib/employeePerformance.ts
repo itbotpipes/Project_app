@@ -66,7 +66,12 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
   const startOfMonth = new Date(nowYear, nowMonth - 1, 1);
   const endOfMonth = new Date(nowYear, nowMonth, 0, 23, 59, 59, 999);
   const weekStart = mondayOf(now);
+  const weekEnd = new Date(weekStart.getTime() + 7 * 86400000 - 1);
   const minQueryDate = new Date(Math.min(startOfMonth.getTime(), weekStart.getTime()) - 365 * 86400000);
+
+  const today = new Date();
+  const isCurrentCalendarMonth =
+    nowYear === today.getFullYear() && nowMonth === today.getMonth() + 1;
 
   const [cardsSnap, reviewSnap, behaviourSnap, targetsSnap, employeeDoc] = await Promise.all([
     adminDb.collection("MonthlyScorecard").where("employeeId", "==", employeeId).get(),
@@ -79,6 +84,9 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
   const allCards = cardsSnap.docs
     .map((d) => ({ id: d.id, ...d.data() }) as any)
     .sort((a, b) => (a.year - b.year) || (a.month - b.month));
+
+  // Scorecard specifically for the target month
+  const targetMonthCard = allCards.find((c) => c.year === nowYear && c.month === nowMonth) || null;
 
   // Filter scorecards up to the selected target year and month
   const cards = allCards.filter(
@@ -107,7 +115,7 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
     autoScore: c.autoTotal != null ? Math.round(c.autoTotal * 10) / 10 : undefined,
     manager: c.total != null ? Math.round(c.total * 10) / 10 : null,
     managerScore: c.total != null ? Math.round(c.total * 10) / 10 : undefined,
-    isLive: c.year === nowYear && c.month === nowMonth,
+    isLive: c.year === nowYear && c.month === nowMonth && isCurrentCalendarMonth,
   }));
   const latestFinal = cards[cards.length - 1];
   const avg = recentAverage(cards);
@@ -258,17 +266,17 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
     };
   });
 
-  // Filter tasks for current month
+  // Filter tasks for selected month strictly between startOfMonth and endOfMonth
   const monthTasks = allRawTasks.filter((t) => {
-    const createdInMonth = t.createdAt && t.createdAt >= startOfMonth;
-    const completedInMonth = t.completedAt && t.completedAt >= startOfMonth;
+    const createdInMonth = t.createdAt && t.createdAt >= startOfMonth && t.createdAt <= endOfMonth;
+    const completedInMonth = t.completedAt && t.completedAt >= startOfMonth && t.completedAt <= endOfMonth;
     return createdInMonth || completedInMonth;
   });
 
-  // Filter tasks for current week
+  // Filter tasks for current/selected week strictly between weekStart and weekEnd
   const weekTasks = allRawTasks.filter((t) => {
-    const createdInWeek = t.createdAt && t.createdAt >= weekStart;
-    const completedInWeek = t.completedAt && t.completedAt >= weekStart;
+    const createdInWeek = t.createdAt && t.createdAt >= weekStart && t.createdAt <= weekEnd;
+    const completedInWeek = t.completedAt && t.completedAt >= weekStart && t.completedAt <= weekEnd;
     return createdInWeek || completedInWeek;
   });
 
@@ -285,11 +293,11 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
 
   // Completed tasks lists
   const completedTasksThisMonth = monthTasks
-    .filter((t) => t.status === "CLOSED" && t.completedAt && t.completedAt >= startOfMonth)
+    .filter((t) => t.status === "CLOSED" && t.completedAt && t.completedAt >= startOfMonth && t.completedAt <= endOfMonth)
     .sort((a, b) => ((b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)));
 
   const completedTasksThisWeek = weekTasks
-    .filter((t) => t.status === "CLOSED" && t.completedAt && t.completedAt >= weekStart)
+    .filter((t) => t.status === "CLOSED" && t.completedAt && t.completedAt >= weekStart && t.completedAt <= weekEnd)
     .sort((a, b) => ((b.completedAt?.getTime() ?? 0) - (a.completedAt?.getTime() ?? 0)));
 
   const allCompletedTasks = allRawTasks
@@ -381,12 +389,12 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
     };
   });
 
-  // Active targets relevant to current month
+  // Active targets relevant to selected month
   const activeTargetsThisMonth = allTargets.filter((t) => {
     if (t.status === "CANCELLED") return false;
     const s = t.startDate ? new Date(t.startDate).getTime() : 0;
     const e = t.endDate ? new Date(t.endDate).getTime() : Infinity;
-    return e >= startOfMonth.getTime() && s <= now.getTime();
+    return e >= startOfMonth.getTime() && s <= endOfMonth.getTime();
   });
 
   // Calculate weighted target achievement rate for current month
@@ -399,20 +407,27 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
   }
   const averageTargetScore = targetTotalWeight > 0 ? Math.round(targetWeightedScore / targetTotalWeight) : null;
 
-  // Add live current-month point to trend if not already finalized in cards
-  const hasCurrentCard = cards.some((c) => c.year === nowYear && c.month === nowMonth);
-  const hasLiveActivity = monthTasks.length > 0 || (kpiAnalytics && (kpiAnalytics.totalTasks > 0 || kpiAnalytics.totalPointsEarned > 0));
-
-  if (!hasCurrentCard && hasLiveActivity) {
-    trend.push({
-      label: `${monthLabel(nowYear, nowMonth)} • Live`,
-      month: monthLabel(nowYear, nowMonth),
-      auto: monthLiveScore,
-      autoScore: monthLiveScore,
-      manager: null,
-      managerScore: undefined,
-      isLive: true,
-    });
+  // Ensure target month point in trend reflects calculated auto score and accurate live indicator
+  const targetCardInTrend = trend.find((p) => p.month === monthLabel(nowYear, nowMonth));
+  if (targetCardInTrend) {
+    if (targetCardInTrend.auto == null && monthLiveScore > 0) {
+      targetCardInTrend.auto = monthLiveScore;
+      targetCardInTrend.autoScore = monthLiveScore;
+    }
+    targetCardInTrend.isLive = isCurrentCalendarMonth;
+  } else {
+    const hasLiveActivity = monthTasks.length > 0 || (kpiAnalytics && (kpiAnalytics.totalTasks > 0 || kpiAnalytics.totalPointsEarned > 0));
+    if (hasLiveActivity || isCurrentCalendarMonth) {
+      trend.push({
+        label: isCurrentCalendarMonth ? `${monthLabel(nowYear, nowMonth)} • Live` : monthLabel(nowYear, nowMonth),
+        month: monthLabel(nowYear, nowMonth),
+        auto: monthLiveScore,
+        autoScore: monthLiveScore,
+        manager: null,
+        managerScore: undefined,
+        isLive: isCurrentCalendarMonth,
+      });
+    }
   }
 
   // Dynamic Target Component for Increment (uses active target score or review score)
@@ -486,6 +501,8 @@ export async function loadEmployeePerformance(employeeId: string, targetDate?: D
     selectedMonthLabel: now.toLocaleDateString("en-IN", { month: "long", year: "numeric" }),
     selectedYear: nowYear,
     selectedMonth: nowMonth,
+    targetMonthCard,
+    isCurrentCalendarMonth,
     completedTasks: {
       thisWeek: completedTasksThisWeek,
       thisMonth: completedTasksThisMonth,
