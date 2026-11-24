@@ -56,6 +56,24 @@ export async function POST(req: Request) {
     const body = await req.json();
     const { id, action } = body;
 
+    if (action === "read_all") {
+      const snap = await adminDb
+        .collection("Notification")
+        .where("recipientId", "==", user.id)
+        .where("read", "==", false)
+        .get();
+
+      if (!snap.empty) {
+        const batch = adminDb.batch();
+        const now = new Date();
+        snap.docs.forEach((doc) => {
+          batch.update(doc.ref, { read: true, notified: true, updatedAt: now });
+        });
+        await batch.commit();
+      }
+      return NextResponse.json({ ok: true });
+    }
+
     if (!id) {
       return NextResponse.json({ error: "Missing id" }, { status: 400 });
     }

@@ -94,6 +94,25 @@ export async function createTask(formData: FormData) {
 
     if (!firstId) firstId = taskRef.id;
 
+    // Dispatch notification to assignee if assigned to someone else
+    if (targetAssigneeId && targetAssigneeId !== user.id) {
+      try {
+        await sendNotification({
+          recipientId: targetAssigneeId,
+          actorId: user.id,
+          actorName: user.name || "Colleague",
+          taskId: taskRef.id,
+          taskTitle: title,
+          type: "TASK_ASSIGNED",
+          title: "New Task Assigned",
+          message: `${user.name || "Colleague"} assigned you "${title}".`,
+          href: `/task/${taskRef.id}`,
+        });
+      } catch (notifErr) {
+        console.error("[createTask] Notification error:", notifErr);
+      }
+    }
+
     // Create checklist items
     if (checklist.length > 0) {
       const batch = adminDb.batch();

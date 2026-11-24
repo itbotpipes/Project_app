@@ -7,7 +7,8 @@ export type NotificationType =
   | "REVIEW_SCORED"
   | "REVIEW_FEEDBACK"
   | "REVIEW_REQUESTED"
-  | "TASK_COMMENT";
+  | "TASK_COMMENT"
+  | "TASK_ASSIGNED";
 
 export interface TaskNotification {
   id: string;

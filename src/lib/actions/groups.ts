@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { getCurrentUser, isManagerLike } from "@/lib/auth";
 import { adminDb } from "@/lib/firebase/admin";
 import { redirect } from "next/navigation";
+import { sendNotification } from "@/lib/notificationService";
 
 export async function createGroup(formData: FormData) {
   const user = await getCurrentUser();
@@ -171,6 +172,24 @@ export async function reassignGroupTask(formData: FormData) {
   if (targetSnap.empty) return { error: "That person isn't in this group." };
 
   await adminDb.collection("Task").doc(taskId).update({ assigneeId: newAssigneeId, updatedAt: new Date() });
+
+  if (newAssigneeId && newAssigneeId !== user.id) {
+    try {
+      await sendNotification({
+        recipientId: newAssigneeId,
+        actorId: user.id,
+        actorName: user.name || "Colleague",
+        taskId,
+        taskTitle: task.title || "Group Task",
+        type: "TASK_ASSIGNED",
+        title: "Task Reassigned To You",
+        message: `${user.name || "Colleague"} reassigned "${task.title || "Task"}" to you.`,
+        href: `/task/${taskId}`,
+      });
+    } catch (notifErr) {
+      console.error("[exchangeTask] Notification error:", notifErr);
+    }
+  }
   await adminDb.collection("AuditLog").add({
     actorId: user.id,
     action: "task.exchange",
