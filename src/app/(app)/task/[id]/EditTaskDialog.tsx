@@ -12,6 +12,7 @@ export default function EditTaskDialog({
   title,
   description,
   category,
+  concernedContact,
   sizeLabel,
   dueAt,
   urgent,
@@ -23,6 +24,7 @@ export default function EditTaskDialog({
   title: string;
   description: string | null;
   category: string | null;
+  concernedContact?: string | null;
   sizeLabel: string | null;
   dueAt: string | null; // "YYYY-MM-DDTHH:mm" or null
   urgent: boolean;
@@ -111,6 +113,15 @@ export default function EditTaskDialog({
                   <input
                     name="category"
                     defaultValue={category ?? ""}
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  />
+                </label>
+                <label className="col-span-2 text-xs font-medium text-slate-600">
+                  Concerned Contact
+                  <input
+                    name="concernedContact"
+                    defaultValue={concernedContact ?? ""}
+                    placeholder="e.g. Client name, vendor, phone number or email"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
                   />
                 </label>

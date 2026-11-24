@@ -209,6 +209,7 @@ export async function loadTaskDetailData(id: string, viewer: { id: string; syste
     description: task.description,
     status: task.status,
     category: task.category,
+    concernedContact: task.concernedContact ?? null,
     sizeLabel: task.sizeLabel,
     reviewRequired: task.reviewRequired,
     reworkCount: task.reworkCount ?? 0,

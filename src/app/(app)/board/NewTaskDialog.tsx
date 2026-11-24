@@ -47,6 +47,7 @@ export default function NewTaskDialog({
   const [selectedKpi, setSelectedKpi] = useState("");
   const [sizeLabel, setSizeLabel] = useState("");
   const [category, setCategory] = useState("");
+  const [concernedContact, setConcernedContact] = useState("");
   const [assigneeIds, setAssigneeIds] = useState<string[]>([selfId]);
   const [assigneeSearch, setAssigneeSearch] = useState("");
   const [priority, setPriority] = useState<"high" | "important-only" | "urgent-only" | "low">("low");
@@ -140,6 +141,7 @@ export default function NewTaskDialog({
     setSelectedKpi("");
     setSizeLabel("");
     setCategory("");
+    setConcernedContact("");
     setAssigneeIds([selfId]);
     setAssigneeSearch("");
     setPriority("low");
@@ -564,6 +566,16 @@ export default function NewTaskDialog({
                     onChange={(e) => setCategory(e.target.value)}
                     placeholder="e.g. Client Follow-up"
                     className="mt-1 w-full rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                  />
+                </label>
+                <label className="col-span-2 text-xs font-medium text-slate-600">
+                  Concerned Contact
+                  <input
+                    name="concernedContact"
+                    value={concernedContact}
+                    onChange={(e) => setConcernedContact(e.target.value)}
+                    placeholder="e.g. Client name, vendor, phone number or email"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm outline-none focus:border-blue-500"
                   />
                 </label>
                 <input type="hidden" name="urgent" value={urgent ? "on" : ""} />

@@ -27,6 +27,7 @@ export async function createTask(formData: FormData) {
   const important = formData.get("important") === "on";
   const reviewRequired = formData.get("reviewRequired") === "on";
   const category = String(formData.get("category") || "").trim() || null;
+  const concernedContact = String(formData.get("concernedContact") || "").trim() || null;
   const groupId = String(formData.get("groupId") || "") || null;
   const checklist = formData.getAll("checklist").map(String).map((s) => s.trim()).filter(Boolean);
   const watcherIds = formData.getAll("watcherIds").map(String).filter(Boolean);
@@ -82,6 +83,7 @@ export async function createTask(formData: FormData) {
       reviewerId,
       status: "NEW",
       category,
+      concernedContact,
       groupId,
       carryCount: 0,
       reworkCount: 0,
@@ -219,6 +221,7 @@ export async function updateTask(formData: FormData) {
   const kpiTemplateId = String(formData.get("kpiTemplateId") || "") || null;
   const sizeLabel = String(formData.get("sizeLabel") || "") || null;
   const category = String(formData.get("category") || "").trim() || null;
+  const concernedContact = String(formData.get("concernedContact") || "").trim() || null;
   const dueRaw = String(formData.get("dueAt") || "");
   const dueAt = dueRaw ? new Date(dueRaw) : null;
   const urgent = formData.get("urgent") === "on";
@@ -230,6 +233,7 @@ export async function updateTask(formData: FormData) {
     kpiTemplateId,
     sizeLabel,
     category,
+    concernedContact,
     dueAt,
     urgent,
     important,

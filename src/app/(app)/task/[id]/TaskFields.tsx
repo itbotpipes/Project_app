@@ -171,6 +171,13 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
             </div>
           )}
 
+          {task.concernedContact && (
+            <div>
+              <dt className="text-xs uppercase tracking-wide text-slate-400">Concerned Contact</dt>
+              <dd className="mt-1 font-medium text-slate-800">{task.concernedContact}</dd>
+            </div>
+          )}
+
           <div>
             <dt className="text-xs uppercase tracking-wide text-slate-400">Priority</dt>
             <dd className={`mt-1 flex items-center gap-1.5 font-medium ${task.priority.tone}`}>
@@ -219,6 +226,7 @@ export default function TaskFields({ data: task }: { data: NonNullable<TaskDetai
                 title={task.title}
                 description={task.description}
                 category={task.category}
+                concernedContact={task.concernedContact}
                 sizeLabel={task.sizeLabel}
                 dueAt={task.dueAtLocalValue}
                 urgent={task.urgent}
