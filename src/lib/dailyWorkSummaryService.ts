@@ -115,7 +115,11 @@ function mapDocToSummaryItem(doc: any, kpiMap?: Map<string, string>): DailySumma
 export async function computeEmployeeDailySummary(
   employee: any,
   targetDate: Date,
-  options?: { performCarryForward?: boolean }
+  options?: {
+    performCarryForward?: boolean;
+    preloadedTasks?: any[];
+    kpiMap?: Map<string, string>;
+  }
 ): Promise<EmployeeDailyWorkSummary> {
   const dayStart = new Date(targetDate);
   dayStart.setHours(0, 0, 0, 0);
@@ -126,38 +130,31 @@ export async function computeEmployeeDailySummary(
   const dateLabel = formatDisplayDate(dayStart);
   const summaryDocId = `${employee.id}_${dateKey}`;
 
-  // 1. Fetch KPI templates to display KPI names
-  const kpiSnap = await adminDb.collection("KpiTemplate").get();
-  const kpiMap = new Map<string, string>();
-  kpiSnap.docs?.forEach((d) => kpiMap.set(d.id, d.data().kpiName));
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const isToday = dayStart.getTime() === todayStart.getTime();
 
-  // 2. Query tasks:
-  // a) Currently active tasks (status != CLOSED and deletedAt == null)
-  // b) Tasks completed on this day (status == CLOSED, completedAt between dayStart and dayEnd)
-  const [openTasksSnap, closedTasksSnap] = await Promise.all([
-    adminDb
+  // 1. Resolve KPI templates
+  let kpiMap = options?.kpiMap;
+  if (!kpiMap) {
+    const kpiSnap = await adminDb.collection("KpiTemplate").get();
+    kpiMap = new Map<string, string>();
+    kpiSnap.docs?.forEach((d) => kpiMap!.set(d.id, d.data().kpiName));
+  }
+
+  // 2. Resolve employee tasks (use preloaded if provided, or single-field query without composite index)
+  let rawTasks: any[] = [];
+  if (options?.preloadedTasks) {
+    rawTasks = options.preloadedTasks;
+  } else {
+    const snap = await adminDb
       .collection("Task")
       .where("assigneeId", "==", employee.id)
-      .where("status", "!=", "CLOSED")
-      .get(),
-    adminDb
-      .collection("Task")
-      .where("assigneeId", "==", employee.id)
-      .where("status", "==", "CLOSED")
-      .where("completedAt", ">=", dayStart)
-      .where("completedAt", "<=", dayEnd)
-      .get(),
-  ]);
+      .get();
+    rawTasks = (snap.docs || []).map((d) => ({ id: d.id, ...d.data(), ref: d.ref }));
+  }
 
-  // Filter out soft-deleted tasks
-  const activeOpenDocs = (openTasksSnap.docs || []).filter((d) => !d.data().deletedAt);
-  const closedTodayDocs = (closedTasksSnap.docs || []).filter((d) => !d.data().deletedAt);
-
-  // Group by status
-  const completedTasks: DailySummaryTaskItem[] = closedTodayDocs.map((d) =>
-    mapDocToSummaryItem(d, kpiMap)
-  );
-
+  const completedTasks: DailySummaryTaskItem[] = [];
   const pendingTasks: DailySummaryTaskItem[] = [];
   const onHoldTasks: DailySummaryTaskItem[] = [];
   const inReviewTasks: DailySummaryTaskItem[] = [];
@@ -165,23 +162,47 @@ export async function computeEmployeeDailySummary(
 
   let newTasksCount = 0;
 
-  for (const doc of activeOpenDocs) {
-    const data = doc.data();
-    const item = mapDocToSummaryItem(doc, kpiMap);
-    unfinishedTaskDocs.push(doc);
+  for (const doc of rawTasks) {
+    const data = doc.data ? doc.data() : doc;
+    if (data.deletedAt) continue; // omit soft-deleted tasks
 
     const createdAt = parseDate(data.createdAt);
-    if (createdAt && createdAt >= dayStart && createdAt <= dayEnd) {
-      newTasksCount++;
+    const completedAt = parseDate(data.completedAt);
+    const updatedAt = parseDate(data.updatedAt);
+    const status = data.status || "NEW";
+
+    // If the task was created after the target day ended, it didn't exist yet on this date
+    if (createdAt && createdAt.getTime() > dayEnd.getTime()) {
+      continue;
     }
 
-    if (data.status === "ON_HOLD") {
-      onHoldTasks.push(item);
-    } else if (data.status === "PENDING_REVIEW") {
-      inReviewTasks.push(item);
-    } else {
-      // NEW, ACCEPTED, IN_PROGRESS, REOPENED
-      pendingTasks.push(item);
+    const item = mapDocToSummaryItem(doc, kpiMap);
+    const isClosed = status === "CLOSED";
+
+    // Completed on target date check:
+    const completedOnTargetDate = isClosed && (
+      (completedAt && completedAt >= dayStart && completedAt <= dayEnd) ||
+      (isToday && (!completedAt || (updatedAt && updatedAt >= dayStart && updatedAt <= dayEnd)))
+    );
+
+    if (completedOnTargetDate) {
+      completedTasks.push(item);
+    } else if (!isClosed) {
+      // Task is active / unfinished on this date
+      unfinishedTaskDocs.push(doc);
+
+      if (createdAt && createdAt >= dayStart && createdAt <= dayEnd) {
+        newTasksCount++;
+      }
+
+      if (status === "ON_HOLD") {
+        onHoldTasks.push(item);
+      } else if (status === "PENDING_REVIEW") {
+        inReviewTasks.push(item);
+      } else {
+        // NEW, ACCEPTED, IN_PROGRESS, REOPENED, CARRIED_FORWARD, TODO
+        pendingTasks.push(item);
+      }
     }
   }
 
@@ -215,13 +236,14 @@ export async function computeEmployeeDailySummary(
   if (options?.performCarryForward && unfinishedTaskDocs.length > 0) {
     const batch = adminDb.batch();
     for (const doc of unfinishedTaskDocs) {
-      const data = doc.data();
+      const docRef = doc.ref || adminDb.collection("Task").doc(doc.id);
+      const data = doc.data ? doc.data() : doc;
       // Idempotency: only increment carryCount if not already carried from this dateKey
       const lastCarried = data.lastCarriedFromDate;
       const currentCarryCount = data.carryCount || 0;
       const newCarryCount = lastCarried === dateKey ? currentCarryCount : currentCarryCount + 1;
 
-      batch.update(doc.ref, {
+      batch.update(docRef, {
         carryForwardDate: nextWorkingDay,
         carryCount: newCarryCount,
         lastCarriedFromDate: dateKey,
@@ -248,7 +270,7 @@ export async function computeEmployeeDailySummary(
     employeeEmail: employee.email || "",
     avatarUrl: employee.avatarUrl || null,
     roleTitle: employee.roleTitle || employee.role?.title || "Team Member",
-    departmentName: employee.departmentName || employee.department?.name || "Operations",
+    departmentName: employee.departmentName || employee.department?.name || "General",
     date: dateKey,
     dateLabel,
     totalTasks,
@@ -290,7 +312,7 @@ export async function computeEmployeeDailySummary(
 
 /**
  * Loads or generates the daily work summary for a specific employee.
- * If a historical snapshot already exists for a past date, returns the snapshot.
+ * If a historical snapshot already exists for a past date with valid tasks, returns the snapshot.
  * If viewing today or if no record exists, generates and stores it.
  */
 export async function getEmployeeDailyWorkSummary(
@@ -307,12 +329,11 @@ export async function getEmployeeDailyWorkSummary(
   todayStart.setHours(0, 0, 0, 0);
   const isToday = dayStart.getTime() === todayStart.getTime();
 
-  if (!forceRegenerate) {
+  if (!forceRegenerate && !isToday) {
     const existingSnap = await adminDb.collection("DailyWorkSummary").doc(summaryDocId).get();
     if (existingSnap.exists) {
       const data = existingSnap.data() as any;
-      // If it's today, we might want fresh counts if tasks were completed in real time
-      if (!isToday) {
+      if (data && (data.totalTasks > 0 || data.completedCount > 0)) {
         return {
           ...data,
           id: existingSnap.id,
@@ -321,7 +342,21 @@ export async function getEmployeeDailyWorkSummary(
     }
   }
 
-  return computeEmployeeDailySummary(employee, targetDate, { performCarryForward: false });
+  // Fetch employee's tasks and KPI template with single-field queries (no composite index needed)
+  const [tasksSnap, kpiSnap] = await Promise.all([
+    adminDb.collection("Task").where("assigneeId", "==", employee.id).get(),
+    adminDb.collection("KpiTemplate").get(),
+  ]);
+
+  const kpiMap = new Map<string, string>();
+  kpiSnap.docs?.forEach((d) => kpiMap.set(d.id, d.data().kpiName));
+  const preloadedTasks = (tasksSnap.docs || []).map((d) => ({ id: d.id, ...d.data(), ref: d.ref }));
+
+  return computeEmployeeDailySummary(employee, targetDate, {
+    performCarryForward: false,
+    preloadedTasks,
+    kpiMap,
+  });
 }
 
 /**
@@ -343,27 +378,56 @@ export async function runEndOfDayProcess(
   const nextWorkingDay = getNextWorkingDay(dayStart);
   const nextWorkingDayStr = formatDateKey(nextWorkingDay);
 
-  // Fetch employees and roles/depts
-  const [allEmpsSnap, rolesSnap, departmentsSnap] = await Promise.all([
-    adminDb.collection("Employee").where("active", "==", true).get(),
+  // Fetch employees, roles, departments, tasks, and KPI templates in parallel
+  const [allEmpsSnap, rolesSnap, departmentsSnap, allTasksSnap, kpiSnap] = await Promise.all([
+    adminDb.collection("Employee").get(),
     fetchAllRoles(adminDb),
     fetchAllDepartments(adminDb),
+    adminDb.collection("Task").get(),
+    adminDb.collection("KpiTemplate").get(),
   ]);
 
-  const rolesMap = new Map<string, string>();
-  rolesSnap.docs?.forEach((d: any) => rolesMap.set(d.id, d.data().title || "Team Member"));
+  const rolesMap = new Map<string, any>();
+  rolesSnap.docs?.forEach((d: any) => rolesMap.set(d.id, d.data()));
 
-  const deptsMap = new Map<string, string>();
-  departmentsSnap.docs?.forEach((d: any) => deptsMap.set(d.id, d.data().name || "Operations"));
+  const deptsMap = new Map<string, any>();
+  departmentsSnap.docs?.forEach((d: any) => deptsMap.set(d.id, { id: d.id, name: d.data().name || "General" }));
 
-  let targetEmps = allEmpsSnap.docs.map((d) => {
+  const kpiMap = new Map<string, string>();
+  kpiSnap.docs?.forEach((d: any) => kpiMap.set(d.id, d.data().kpiName));
+
+  const tasksByAssignee = new Map<string, any[]>();
+  allTasksSnap.docs?.forEach((doc: any) => {
+    const data = doc.data();
+    if (data.deletedAt) return;
+    const assigneeId = data.assigneeId;
+    if (!assigneeId) return;
+    if (!tasksByAssignee.has(assigneeId)) {
+      tasksByAssignee.set(assigneeId, []);
+    }
+    tasksByAssignee.get(assigneeId)!.push({ id: doc.id, ...data, ref: doc.ref });
+  });
+
+  let targetEmps: any[] = [];
+  allEmpsSnap.docs?.forEach((d) => {
     const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      roleTitle: data.roleId ? rolesMap.get(data.roleId) || "Team Member" : "Team Member",
-      departmentName: data.departmentId ? deptsMap.get(data.departmentId) || "Operations" : "Operations",
-    };
+    if (data.active !== false) {
+      const role = data.roleId ? rolesMap.get(data.roleId) : null;
+      const roleTitle = role?.title || data.roleTitle || "Team Member";
+      const resolvedDeptId = data.departmentId || role?.departmentId || null;
+      const deptObj = resolvedDeptId ? deptsMap.get(resolvedDeptId) : null;
+      const departmentName = deptObj?.name || data.departmentName || "General";
+      const departmentId = resolvedDeptId || deptObj?.id || "dept-general";
+
+      targetEmps.push({
+        id: d.id,
+        ...data,
+        name: data.name || "Employee",
+        roleTitle,
+        departmentId,
+        departmentName,
+      });
+    }
   });
 
   if (targetEmployeeId) {
@@ -373,7 +437,12 @@ export async function runEndOfDayProcess(
   const summaries: EmployeeDailyWorkSummary[] = [];
 
   for (const emp of targetEmps) {
-    const summary = await computeEmployeeDailySummary(emp, dayStart, { performCarryForward: true });
+    const empTasks = tasksByAssignee.get(emp.id) || [];
+    const summary = await computeEmployeeDailySummary(emp, dayStart, {
+      performCarryForward: true,
+      preloadedTasks: empTasks,
+      kpiMap,
+    });
     summaries.push(summary);
   }
 
@@ -403,34 +472,64 @@ export async function loadCompanyDailyWorkSummaries(
   todayStart.setHours(0, 0, 0, 0);
   const isToday = dayStart.getTime() === todayStart.getTime();
 
-  // 1. Determine Permission Scope & Permitted Employees
-  let viewScope: "COMPANY" | "TEAM" | "SELF" = "COMPANY";
-  let permittedEmployees: any[] = [];
-
-  const [rolesSnap, departmentsSnap, allEmpsSnap] = await Promise.all([
+  // 1. Fetch all required company collections in parallel
+  const [rolesSnap, departmentsSnap, allEmpsSnap, allTasksSnap, kpiSnap] = await Promise.all([
     fetchAllRoles(adminDb),
     fetchAllDepartments(adminDb),
-    adminDb.collection("Employee").where("active", "==", true).get(),
+    adminDb.collection("Employee").get(),
+    adminDb.collection("Task").get(),
+    adminDb.collection("KpiTemplate").get(),
   ]);
 
-  const rolesMap = new Map<string, string>();
-  rolesSnap.docs?.forEach((d: any) => rolesMap.set(d.id, d.data().title || "Team Member"));
+  const rolesMap = new Map<string, any>();
+  rolesSnap.docs?.forEach((d: any) => rolesMap.set(d.id, d.data()));
 
-  const deptsMap = new Map<string, string>();
-  departmentsSnap.docs?.forEach((d: any) => deptsMap.set(d.id, d.data().name || "Operations"));
+  const deptsMap = new Map<string, any>();
+  departmentsSnap.docs?.forEach((d: any) => deptsMap.set(d.id, { id: d.id, name: d.data().name || "General" }));
 
-  const allActiveEmps: any[] = allEmpsSnap.docs.map((d) => {
+  const kpiMap = new Map<string, string>();
+  kpiSnap.docs?.forEach((d: any) => kpiMap.set(d.id, d.data().kpiName));
+
+  // Index active tasks by assigneeId
+  const tasksByAssignee = new Map<string, any[]>();
+  allTasksSnap.docs?.forEach((doc: any) => {
+    const data = doc.data();
+    if (data.deletedAt) return; // ignore soft-deleted
+    const assigneeId = data.assigneeId;
+    if (!assigneeId) return;
+    if (!tasksByAssignee.has(assigneeId)) {
+      tasksByAssignee.set(assigneeId, []);
+    }
+    tasksByAssignee.get(assigneeId)!.push({ id: doc.id, ...data, ref: doc.ref });
+  });
+
+  // Resolve all active employees with direct + role-fallback department resolution
+  const allActiveEmps: any[] = [];
+  allEmpsSnap.docs?.forEach((d) => {
     const data = d.data();
-    return {
-      id: d.id,
-      ...data,
-      name: data.name || "Employee",
-      roleTitle: data.roleId ? rolesMap.get(data.roleId) || "Team Member" : "Team Member",
-      departmentName: data.departmentId ? deptsMap.get(data.departmentId) || "Operations" : "Operations",
-    };
+    if (data.active !== false) {
+      const role = data.roleId ? rolesMap.get(data.roleId) : null;
+      const roleTitle = role?.title || data.roleTitle || "Team Member";
+      const resolvedDeptId = data.departmentId || role?.departmentId || null;
+      const deptObj = resolvedDeptId ? deptsMap.get(resolvedDeptId) : null;
+      const departmentName = deptObj?.name || data.departmentName || "General";
+      const departmentId = resolvedDeptId || deptObj?.id || "dept-general";
+
+      allActiveEmps.push({
+        id: d.id,
+        ...data,
+        name: data.name || "Employee",
+        roleTitle,
+        departmentId,
+        departmentName,
+      });
+    }
   });
 
   allActiveEmps.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
+
+  let viewScope: "COMPANY" | "TEAM" | "SELF" = "COMPANY";
+  let permittedEmployees: any[] = [];
 
   if (!viewerUser) {
     permittedEmployees = allActiveEmps;
@@ -471,13 +570,16 @@ export async function loadCompanyDailyWorkSummaries(
     if (found) userDepartmentName = found.departmentName;
   }
 
-  // 2. Load or Compute Daily Work Summary for all active employees
-  // We compute for all active employees so that department-wise summaries and shareable reports
-  // are complete and accessible to all team members across departments.
+  // 2. Load or Compute Daily Work Summary for all active employees using preloaded tasks
   const allSummariesMap = new Map<string, EmployeeDailyWorkSummary>();
   const summaryPromises = allActiveEmps.map(async (emp) => {
     try {
-      const summary = await getEmployeeDailyWorkSummary(emp, dayStart);
+      const empTasks = tasksByAssignee.get(emp.id) || [];
+      const summary = await computeEmployeeDailySummary(emp, dayStart, {
+        performCarryForward: false,
+        preloadedTasks: empTasks,
+        kpiMap,
+      });
       return { empId: emp.id, summary };
     } catch (err) {
       console.error(`Failed to load daily work summary for ${emp.name}:`, err);
@@ -487,7 +589,7 @@ export async function loadCompanyDailyWorkSummaries(
 
   const loadedResults = await Promise.all(summaryPromises);
   loadedResults.forEach((item) => {
-    if (item) allSummariesMap.set(item.empId, item.summary);
+    if (item && item.summary) allSummariesMap.set(item.empId, item.summary);
   });
 
   // Filter summaries for permitted individual view
@@ -501,7 +603,7 @@ export async function loadCompanyDailyWorkSummaries(
   // Group all active employees by department and aggregate metrics & task lists
   const deptMap = new Map<string, { id: string; name: string; emps: any[] }>();
   allActiveEmps.forEach((emp) => {
-    const dName = emp.departmentName || "Operations";
+    const dName = emp.departmentName || "General";
     const dId = emp.departmentId || dName;
     if (!deptMap.has(dName)) {
       deptMap.set(dName, { id: dId, name: dName, emps: [] });
