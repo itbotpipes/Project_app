@@ -1,3 +1,6 @@
+"use client";
+
+import { useState } from "react";
 import { cn } from "@/lib/cn";
 
 function initials(name: string) {
@@ -17,14 +20,16 @@ export default function Avatar({
   className?: string;
   ring?: boolean;
 }) {
+  const [hasError, setHasError] = useState(false);
   const style = { width: size, height: size, fontSize: Math.max(10, size * 0.34) };
-  if (url) {
+  if (url && !hasError) {
     return (
       // eslint-disable-next-line @next/next/no-img-element
       <img
         src={url}
         alt={name}
         style={style}
+        onError={() => setHasError(true)}
         className={cn("shrink-0 rounded-full object-cover", ring && "ring-4 ring-amber-300", className)}
       />
     );

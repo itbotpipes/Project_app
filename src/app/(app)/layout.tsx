@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import Link from "next/link";
 import { getCurrentUser, isManagerLike, canScoreCompanyWide } from "@/lib/auth";
 import { logoutAction } from "@/lib/actions/auth";
 import { getAlerts } from "@/lib/alerts";
@@ -9,6 +10,7 @@ import WatcherPoller from "./_components/WatcherPoller";
 import ReviewNotificationToasts from "./_components/ReviewNotificationToasts";
 import { TaskDrawerProvider } from "./_components/TaskDrawerContext";
 import TaskDrawerHost from "./_components/TaskDrawerHost";
+import Avatar from "./_components/Avatar";
 
 export default async function AppLayout({
   children,
@@ -19,13 +21,6 @@ export default async function AppLayout({
   if (!user) redirect("/login");
 
   const alerts = await getAlerts(user);
-
-  const initials = user.name
-    .split(" ")
-    .map((p: string) => p[0])
-    .slice(0, 2)
-    .join("")
-    .toUpperCase();
 
   return (
     <TaskDrawerProvider>
@@ -66,13 +61,17 @@ export default async function AppLayout({
             </div>
             <div className="ml-auto flex items-center gap-3">
               <NotificationBell alerts={alerts} />
-              <div className="text-right leading-tight">
-                <div className="text-sm font-medium">{user.name}</div>
-                <div className="text-[11px] text-slate-500">{user.role?.title ?? user.systemRole ?? "Team Member"}</div>
-              </div>
-              <div className="grid h-9 w-9 place-items-center rounded-full bg-slate-200 text-sm font-semibold text-slate-700">
-                {initials}
-              </div>
+              <Link href="/profile" className="flex items-center gap-3 transition-opacity hover:opacity-90" title="View profile">
+                <div className="text-right leading-tight">
+                  <div className="text-sm font-medium">{user.name}</div>
+                  <div className="text-[11px] text-slate-500">{user.role?.title ?? user.systemRole ?? "Team Member"}</div>
+                </div>
+                <Avatar
+                  name={user.name}
+                  url={user.avatarUrl || user.photoUrl || user.image || null}
+                  size={36}
+                />
+              </Link>
               <form action={logoutAction}>
                 <button className="rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100">
                   Sign out
