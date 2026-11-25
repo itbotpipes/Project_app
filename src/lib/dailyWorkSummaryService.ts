@@ -15,6 +15,75 @@ import {
 
 export * from "./dailyWorkSummaryTypes";
 
+/**
+ * Checks if the user is an Executive (CEO, COO, Managing Director, Director) or Admin.
+ * They have full company-wide access to all departments and all individual summaries.
+ */
+export function isExecutiveOrAdmin(user: any): boolean {
+  if (!user) return false;
+  const sysRole = (user.systemRole || "").toUpperCase().trim();
+  if (
+    user.systemRoleObj?.isAdmin === true ||
+    sysRole === "ADMIN" ||
+    sysRole === "CEO" ||
+    sysRole === "COO"
+  ) {
+    return true;
+  }
+  if (canScoreCompanyWide(user) || hasPermission(user, "admin")) {
+    return true;
+  }
+  const roleTitle = (
+    user.role?.title ||
+    user.roleTitle ||
+    user.customRoleTitle ||
+    ""
+  ).toLowerCase().trim();
+  if (
+    roleTitle === "ceo" ||
+    roleTitle === "coo" ||
+    roleTitle.startsWith("ceo") ||
+    roleTitle.startsWith("coo") ||
+    roleTitle.includes("/ md") ||
+    roleTitle.includes("/ director") ||
+    roleTitle.includes("managing director") ||
+    roleTitle.includes("chief operating officer") ||
+    roleTitle.includes("chief executive officer")
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolves all subordinate employees reporting to managerId (directly or transitively).
+ */
+export function getSubordinateEmployees(
+  managerId: string,
+  allEmployees: any[]
+): any[] {
+  const managedIds = new Set<string>();
+  let added = true;
+
+  while (added) {
+    added = false;
+    for (const emp of allEmployees) {
+      if (emp.id === managerId || managedIds.has(emp.id)) continue;
+      const mgrIds: string[] = Array.isArray(emp.reportsToIds)
+        ? emp.reportsToIds
+        : emp.reportsToId
+        ? [emp.reportsToId]
+        : [];
+      if (mgrIds.includes(managerId) || mgrIds.some((id) => managedIds.has(id))) {
+        managedIds.add(emp.id);
+        added = true;
+      }
+    }
+  }
+
+  return allEmployees.filter((e) => managedIds.has(e.id));
+}
+
 /** Converts Firestore Timestamp, Date, string or null into a standard JS Date */
 export function parseDate(val: any): Date | null {
   if (!val) return null;
@@ -540,46 +609,52 @@ export async function loadCompanyDailyWorkSummaries(
 
   allActiveEmps.sort((a, b) => (a.name || "").localeCompare(b.name || ""));
 
-  let viewScope: "COMPANY" | "TEAM" | "SELF" = "COMPANY";
-  let permittedEmployees: any[] = [];
-
-  if (!viewerUser) {
-    permittedEmployees = allActiveEmps;
-  } else {
-    const canCompany =
-      canScoreCompanyWide(viewerUser) ||
-      hasPermission(viewerUser, "admin") ||
-      viewerUser.systemRole === "ADMIN" ||
-      viewerUser.systemRole === "CEO";
-
-    const isMgr = isManagerLike(viewerUser.systemRole, viewerUser.systemRoleObj);
-
-    if (canCompany) {
-      viewScope = "COMPANY";
-      permittedEmployees = allActiveEmps;
-    } else if (isMgr) {
-      viewScope = "TEAM";
-      const reportEmps = allActiveEmps.filter((e) => {
-        const mgrIds = Array.isArray(e.reportsToIds)
-          ? e.reportsToIds
-          : e.reportsToId
-          ? [e.reportsToId]
-          : [];
-        return mgrIds.includes(viewerUser.id) || e.id === viewerUser.id;
-      });
-      permittedEmployees = reportEmps.length > 0 ? reportEmps : [viewerUser];
-    } else {
-      viewScope = "SELF";
-      const selfEmp = allActiveEmps.find((e) => e.id === viewerUser.id);
-      permittedEmployees = selfEmp ? [selfEmp] : [viewerUser];
-    }
-  }
-
-  // Find viewer's department name
+  // Find viewer's department name early
   let userDepartmentName: string | undefined = undefined;
   if (viewerUser) {
     const found = allActiveEmps.find((e) => e.id === viewerUser.id);
     if (found) userDepartmentName = found.departmentName;
+  }
+
+  let viewScope: "COMPANY" | "TEAM" | "SELF" = "COMPANY";
+  let permittedEmployees: any[] = [];
+  const permittedDeptNames = new Set<string>();
+
+  const isExec = !viewerUser ? true : isExecutiveOrAdmin(viewerUser);
+
+  if (isExec) {
+    // 1. CEO, COO, and ADMIN: full access to all company departments and all employees
+    viewScope = "COMPANY";
+    permittedEmployees = allActiveEmps;
+  } else {
+    // 2. Managers: can see who reports to them (direct or indirect reports) + themselves
+    const subordinates = getSubordinateEmployees(viewerUser.id, allActiveEmps);
+    const isMgr = isManagerLike(viewerUser.systemRole, viewerUser.systemRoleObj) || subordinates.length > 0;
+
+    if (isMgr) {
+      viewScope = "TEAM";
+      const selfEmp = allActiveEmps.find((e) => e.id === viewerUser.id) || viewerUser;
+      const combined = [selfEmp, ...subordinates];
+      const seen = new Set<string>();
+      permittedEmployees = combined.filter((e) => {
+        if (seen.has(e.id)) return false;
+        seen.add(e.id);
+        return true;
+      });
+
+      // Manager department scope: their own department + all departments of reporting members
+      if (userDepartmentName) permittedDeptNames.add(userDepartmentName);
+      permittedEmployees.forEach((e) => {
+        if (e.departmentName) permittedDeptNames.add(e.departmentName);
+      });
+    } else {
+      // 3. Regular Employees: can ONLY see their own individual summary & their own department
+      viewScope = "SELF";
+      const selfEmp = allActiveEmps.find((e) => e.id === viewerUser.id);
+      permittedEmployees = selfEmp ? [selfEmp] : [viewerUser];
+
+      if (userDepartmentName) permittedDeptNames.add(userDepartmentName);
+    }
   }
 
   // 2. Load or Compute Daily Work Summary for all active employees using preloaded tasks
@@ -746,8 +821,25 @@ export async function loadCompanyDailyWorkSummaries(
     });
   }
 
+  // Filter departmentSummaries according to role permissions:
+  // - CEO/COO/Admin see all company departments
+  // - Managers see their own department + reporting members' departments
+  // - Regular employees see ONLY their own department
+  let scopedDepartmentSummaries = departmentSummaries;
+  if (!isExec) {
+    scopedDepartmentSummaries = departmentSummaries.filter((d) =>
+      permittedDeptNames.has(d.departmentName)
+    );
+    // Discrepancy fallback: ensure at least user's department is present if active
+    if (scopedDepartmentSummaries.length === 0 && userDepartmentName) {
+      scopedDepartmentSummaries = departmentSummaries.filter(
+        (d) => d.departmentName.toLowerCase() === userDepartmentName!.toLowerCase()
+      );
+    }
+  }
+
   // Sort departments: put user's own department first, then alphabetical
-  departmentSummaries.sort((a, b) => {
+  scopedDepartmentSummaries.sort((a, b) => {
     if (userDepartmentName && a.departmentName === userDepartmentName) return -1;
     if (userDepartmentName && b.departmentName === userDepartmentName) return 1;
     return a.departmentName.localeCompare(b.departmentName);
@@ -831,6 +923,6 @@ export async function loadCompanyDailyWorkSummaries(
     summaries,
     selectedSummary,
     employeesList,
-    departmentSummaries,
+    departmentSummaries: scopedDepartmentSummaries,
   };
 }

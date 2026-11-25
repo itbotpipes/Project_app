@@ -66,6 +66,11 @@ export default function DailySummaryView({
   const [searchQuery, setSearchQuery] = useState("");
   const [departmentFilter, setDepartmentFilter] = useState("ALL");
 
+  // Allowed employee IDs that the current user has permission to inspect individually
+  const allowedEmployeeIds = useMemo(() => {
+    return new Set(data.summaries.map((s) => s.employeeId));
+  }, [data.summaries]);
+
   // Date handlers
   function handleDateChange(newDateStr: string) {
     if (!newDateStr) return;
@@ -210,7 +215,11 @@ export default function DailySummaryView({
             )}
           >
             <Building2 size={14} className={viewMode === "DEPARTMENT" ? "text-blue-600" : "text-slate-400"} />
-            <span>Departments ({data.departmentSummaries.length})</span>
+            <span>
+              {data.viewScope === "SELF"
+                ? "Department"
+                : `Departments (${data.departmentSummaries.length})`}
+            </span>
           </button>
 
           <button
@@ -223,31 +232,43 @@ export default function DailySummaryView({
             )}
           >
             <User size={14} className={viewMode === "INDIVIDUAL" ? "text-blue-600" : "text-slate-400"} />
-            <span>Employees ({data.summaries.length})</span>
+            <span>
+              {data.viewScope === "SELF"
+                ? "My Summary"
+                : data.viewScope === "TEAM"
+                ? `Team (${data.summaries.length})`
+                : `Employees (${data.summaries.length})`}
+            </span>
           </button>
         </div>
 
         {/* Quick context indicator or selector */}
         {viewMode === "DEPARTMENT" ? (
-          <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-0.5">
-            {data.departmentSummaries.map((dept) => {
-              const isSelected = dept.departmentName === selectedDeptName;
-              return (
-                <button
-                  key={dept.departmentName}
-                  onClick={() => setSelectedDeptName(dept.departmentName)}
-                  className={cn(
-                    "px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition",
-                    isSelected
-                      ? "bg-slate-900 text-white shadow-xs"
-                      : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
-                  )}
-                >
-                  {dept.departmentName}
-                </button>
-              );
-            })}
-          </div>
+          data.departmentSummaries.length > 1 ? (
+            <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-0.5">
+              {data.departmentSummaries.map((dept) => {
+                const isSelected = dept.departmentName === selectedDeptName;
+                return (
+                  <button
+                    key={dept.departmentName}
+                    onClick={() => setSelectedDeptName(dept.departmentName)}
+                    className={cn(
+                      "px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition",
+                      isSelected
+                        ? "bg-slate-900 text-white shadow-xs"
+                        : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+                    )}
+                  >
+                    {dept.departmentName}
+                  </button>
+                );
+              })}
+            </div>
+          ) : data.departmentSummaries.length === 1 ? (
+            <div className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200/60">
+              {data.departmentSummaries[0].departmentName} Department
+            </div>
+          ) : null
         ) : (
           data.viewScope !== "SELF" && (
             <div className="flex items-center gap-2">
@@ -287,6 +308,8 @@ export default function DailySummaryView({
             <DepartmentSummaryCard
               department={currentDepartmentSummary}
               onSelectEmployee={handleSelectEmployeeFromDept}
+              allowedEmployeeIds={allowedEmployeeIds}
+              currentUserId={currentUserId}
             />
           ) : (
             <Card className="p-8 text-center text-xs text-slate-500">

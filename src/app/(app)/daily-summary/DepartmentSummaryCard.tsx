@@ -28,9 +28,13 @@ import {
 export default function DepartmentSummaryCard({
   department,
   onSelectEmployee,
+  allowedEmployeeIds,
+  currentUserId,
 }: {
   department: DepartmentDailyWorkSummary;
   onSelectEmployee?: (empId: string) => void;
+  allowedEmployeeIds?: Set<string>;
+  currentUserId?: string;
 }) {
   const [copied, setCopied] = useState(false);
   const [activeTab, setActiveTab] = useState<"STATUS" | "MEMBERS">("STATUS");
@@ -456,7 +460,7 @@ export default function DepartmentSummaryCard({
                     <div className="flex items-center gap-2 self-end sm:self-auto">
                       <Badge className={mBadgeClass}>{member.productivityLabel}</Badge>
 
-                      {onSelectEmployee && (
+                      {onSelectEmployee && (!allowedEmployeeIds || allowedEmployeeIds.has(member.employeeId)) && (
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -464,7 +468,7 @@ export default function DepartmentSummaryCard({
                           }}
                           className="px-2.5 py-1 rounded-lg text-xs font-medium text-blue-600 hover:text-blue-800 hover:bg-blue-50 border border-blue-200 transition"
                         >
-                          View Individual
+                          {member.employeeId === currentUserId ? "My Card" : "View Individual"}
                         </button>
                       )}
 
