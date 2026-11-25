@@ -108,6 +108,12 @@ export default function DailySummaryView({
   // Trigger End of Day Process
   function handleRunEndOfDay() {
     if (isPending) return;
+    if (data.isToday) {
+      const confirmed = window.confirm(
+        "Run End-of-Day for Today?\n\nThis will record today's summary snapshot and schedule unfinished tasks to roll over to the next working day. Are you sure you want to proceed?"
+      );
+      if (!confirmed) return;
+    }
     setActionMessage(null);
     startTransition(async () => {
       const res = await triggerEndOfDaySummaryAction({

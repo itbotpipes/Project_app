@@ -128,6 +128,9 @@ export default async function AllTasksPage({
     ? allEmployees.filter(e => accessibleTeamIds!.has(e.id))
     : allEmployees;
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   // Process all tasks
   const rawTasks = tasksSnap.docs
     .map(doc => {
@@ -136,6 +139,9 @@ export default async function AllTasksPage({
       const project = data.projectId ? projectsMap.get(data.projectId) : null;
       const creator = data.creatorId ? employeesMap.get(data.creatorId) : null;
       const quad = priorityQuadrant(!!data.urgent, !!data.important);
+      const createdAt = toDate(data.createdAt);
+      const isCreatedToday = createdAt ? createdAt.getTime() >= todayStart.getTime() : false;
+      const effectiveCarryCount = isCreatedToday ? 0 : (data.carryCount || 0);
 
       return {
         id: doc.id,
@@ -147,11 +153,11 @@ export default async function AllTasksPage({
         important: !!data.important,
         estimatedMins: data.estimatedMins || null,
         dueAt: toDate(data.dueAt),
-        createdAt: toDate(data.createdAt),
+        createdAt,
         deletedAt: toDate(data.deletedAt),
         holdReason: data.holdReason || null,
         reviewRequired: !!data.reviewRequired,
-        carryCount: data.carryCount || 0,
+        carryCount: effectiveCarryCount,
         managerScore: data.managerScore ?? null,
         priority: quad,
         assignee,

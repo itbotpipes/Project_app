@@ -235,9 +235,18 @@ export async function computeEmployeeDailySummary(
   // Perform safe carry-forward on task documents if requested
   if (options?.performCarryForward && unfinishedTaskDocs.length > 0) {
     const batch = adminDb.batch();
+    let hasUpdates = false;
     for (const doc of unfinishedTaskDocs) {
       const docRef = doc.ref || adminDb.collection("Task").doc(doc.id);
       const data = doc.data ? doc.data() : doc;
+
+      // Rule: Tasks created on targetDate (today) cannot be carried forward while targetDate is still ongoing!
+      // A task created today is for today; it has never been carried over from a past day.
+      const taskCreatedAt = parseDate(data.createdAt);
+      if (isToday && taskCreatedAt && taskCreatedAt >= dayStart) {
+        continue;
+      }
+
       // Idempotency: only increment carryCount if not already carried from this dateKey
       const lastCarried = data.lastCarriedFromDate;
       const currentCarryCount = data.carryCount || 0;
@@ -249,8 +258,11 @@ export async function computeEmployeeDailySummary(
         lastCarriedFromDate: dateKey,
         updatedAt: new Date(),
       });
+      hasUpdates = true;
     }
-    await batch.commit();
+    if (hasUpdates) {
+      await batch.commit();
+    }
   }
 
   // Calculate Quality-Based Reward Points earned today

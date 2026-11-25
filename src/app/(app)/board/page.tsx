@@ -112,12 +112,18 @@ export default async function BoardPage({
     checklistsByTask.get(taskId)!.push({ done: c.data().done });
   });
 
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+
   const tasks = boardDocs.map(doc => {
     const t = doc.data() as any;
     const kpi = t.kpiTemplateId ? (kpisMap.get(t.kpiTemplateId) as any) : null;
     const project = t.projectId ? (projectsMap.get(t.projectId) as any) : null;
     const creator = t.creatorId ? (creatorsMap.get(t.creatorId) as any) : null;
     const checklistItems = checklistsByTask.get(doc.id) || [];
+    const createdAt = toDate(t.createdAt);
+    const isCreatedToday = createdAt ? createdAt.getTime() >= todayStart.getTime() : false;
+    const effectiveCarryCount = isCreatedToday ? 0 : (t.carryCount ?? 0);
     return {
       id: doc.id,
       title: t.title,
@@ -129,7 +135,7 @@ export default async function BoardPage({
       dueAt: toDate(t.dueAt)?.toISOString() ?? null,
       holdReason: t.holdReason,
       reviewRequired: t.reviewRequired,
-      carryCount: t.carryCount ?? 0,
+      carryCount: effectiveCarryCount,
       reworkCount: t.reworkCount ?? 0,
       managerScore: t.managerScore ?? null,
       concernedContact: t.concernedContact ?? null,
@@ -176,8 +182,6 @@ export default async function BoardPage({
   const bucketData = kpiOptions.map(k => ({ id: k.id, name: k.kpiName, count: countByKpi.get(k.id) ?? 0 }));
 
   // Today's per-KPI counts (for the new task dialog)
-  const todayStart = new Date();
-  todayStart.setHours(0, 0, 0, 0);
   const todayStartMs = todayStart.getTime();
   const todaysCounts: Record<string, number> = {};
   for (const doc of monthUserTasks) {
