@@ -13,6 +13,7 @@ export default function CreateTemplateDialog({
   roles,
   lockRoleId,
   lockRoleName,
+  userRoleId,
   buttonLabel,
   defaultPersonal = true,
 }: {
@@ -20,6 +21,7 @@ export default function CreateTemplateDialog({
   roles?: RoleOpt[];
   lockRoleId?: string;
   lockRoleName?: string;
+  userRoleId?: string;
   buttonLabel?: string;
   defaultPersonal?: boolean;
 }) {
@@ -36,7 +38,27 @@ export default function CreateTemplateDialog({
     setDraft("");
   }
 
-  const kpiForRole = kpiOptions.filter((k) => !roleId || k.roleId === roleId);
+  // Determine effective role:
+  // - Personal template: strictly user's own role (or locked role)
+  // - Shared template: target position selected in dropdown, or locked role, or user's role
+  const effectiveRoleId = isPersonal
+    ? (lockRoleId || userRoleId || roleId)
+    : (roleId || lockRoleId || userRoleId);
+
+  const rawKpiForRole = effectiveRoleId
+    ? kpiOptions.filter((k) => k.roleId === effectiveRoleId)
+    : kpiOptions;
+
+  // Deduplicate by KPI name (case-insensitive) so no KPI is ever shown double
+  const seenKpiNames = new Set<string>();
+  const kpiForRole: KpiOpt[] = [];
+  for (const k of rawKpiForRole) {
+    const key = k.kpiName.trim().toLowerCase();
+    if (!seenKpiNames.has(key)) {
+      seenKpiNames.add(key);
+      kpiForRole.push(k);
+    }
+  }
 
   return (
     <>
@@ -75,6 +97,9 @@ export default function CreateTemplateDialog({
                   fd.set("isPersonal", "false");
                 } else {
                   fd.set("isPersonal", isPersonal ? "true" : "false");
+                  if (isPersonal && userRoleId) {
+                    fd.set("roleId", userRoleId);
+                  }
                 }
                 await createTemplate(fd);
                 setOpen(false);

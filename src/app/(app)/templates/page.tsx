@@ -87,6 +87,12 @@ export default async function TemplatesPage() {
 
   const isManager = isManagerLike(user.systemRole);
 
+  let userRoleId = user.roleId || user.role?.id;
+  if (!userRoleId && user.role?.title) {
+    const matched = roles.find((r: any) => r.title.toLowerCase() === user.role?.title?.toLowerCase());
+    if (matched) userRoleId = matched.id;
+  }
+
   return (
     <div className="mx-auto max-w-4xl space-y-6">
       {/* Header bar */}
@@ -108,6 +114,7 @@ export default async function TemplatesPage() {
         <CreateTemplateDialog
           kpiOptions={kpiOptions}
           roles={roles}
+          userRoleId={userRoleId}
           buttonLabel="Create My Template"
         />
       </div>
@@ -135,6 +142,7 @@ export default async function TemplatesPage() {
               <CreateTemplateDialog
                 kpiOptions={kpiOptions}
                 roles={roles}
+                userRoleId={userRoleId}
                 buttonLabel="+ Create Your First Template"
               />
             </div>

@@ -100,8 +100,22 @@ export default function NewTaskDialog({
     if (result.dueAt) setDueAt(result.dueAt);
   }
 
-  const firstAssigneeRoleId = people.find((p) => assigneeIds.includes(p.id))?.roleId;
-  const filteredKpiOptions = kpiOptions.filter((k) => !k.roleId || k.roleId === firstAssigneeRoleId);
+  const firstAssignee = people.find((p) => assigneeIds.includes(p.id));
+  const firstAssigneeRoleId = firstAssignee?.roleId || people.find((p) => p.id === selfId)?.roleId;
+  const rawFilteredKpiOptions = firstAssigneeRoleId
+    ? kpiOptions.filter((k) => k.roleId === firstAssigneeRoleId)
+    : kpiOptions;
+
+  // Deduplicate by KPI name (case-insensitive) so no KPI is ever shown double
+  const seenKpi = new Set<string>();
+  const filteredKpiOptions: KpiOpt[] = [];
+  for (const k of rawFilteredKpiOptions) {
+    const key = k.kpiName.trim().toLowerCase();
+    if (!seenKpi.has(key)) {
+      seenKpi.add(key);
+      filteredKpiOptions.push(k);
+    }
+  }
   
   // Everyone sees their own created templates + position/general templates
   const myTemplates = (templates ?? []).filter((t) => t.createdById === selfId);
