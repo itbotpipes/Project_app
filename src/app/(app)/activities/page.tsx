@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
-import { getCurrentUser, isManagerLike } from "@/lib/auth";
+import { getCurrentUser } from "@/lib/auth";
+import { isExecutiveOrAdmin } from "@/lib/dailyWorkSummaryService";
 import { adminDb } from "@/lib/firebase/admin";
 import { relativeTime } from "@/lib/date";
 import ActivitiesView, { ActivityItem } from "./ActivitiesView";
@@ -8,23 +9,80 @@ export default async function ActivitiesPage() {
   const user = await getCurrentUser();
   if (!user) redirect("/login");
 
-  const isManager = isManagerLike(user.systemRole) || user.isAdmin || user.isManager;
+  // 1. Fetch active Employees, Roles, and Departments to resolve department scoping
+  const [employeesSnap, departmentsSnap, rolesSnap] = await Promise.all([
+    adminDb.collection("Employee").where("active", "==", true).get(),
+    adminDb.collection("Department").get(),
+    adminDb.collection("Role").get(),
+  ]);
 
-  // 1. Fetch AuditLog records
-  let logsSnap;
-  if (isManager) {
-    logsSnap = await adminDb.collection("AuditLog").orderBy("createdAt", "desc").limit(200).get();
-  } else {
-    logsSnap = await adminDb
-      .collection("AuditLog")
-      .where("actorId", "==", user.id)
-      .orderBy("createdAt", "desc")
-      .limit(100)
-      .get();
+  const roleMap = new Map<string, any>();
+  for (const doc of rolesSnap.docs || []) {
+    roleMap.set(doc.id, doc.data());
   }
 
-  // 2. Extract referenced Actor IDs, Task IDs, and Department references
-  // Activities retention window: only display logs within the last 30 days (1 month)
+  const deptMap = new Map<string, string>();
+  for (const doc of departmentsSnap.docs || []) {
+    deptMap.set(doc.id, doc.data().name);
+  }
+
+  const employeeMap = new Map<string, any>();
+  const allActiveEmps: any[] = [];
+  for (const doc of employeesSnap.docs || []) {
+    const d = doc.data();
+    const role = d.roleId ? roleMap.get(d.roleId) : null;
+    const resolvedDeptId = d.departmentId || role?.departmentId || null;
+    const departmentName = resolvedDeptId
+      ? deptMap.get(resolvedDeptId) || d.departmentName || "General"
+      : d.departmentName || "General";
+
+    const empData = {
+      id: doc.id,
+      name: d.name || "Unknown",
+      email: d.email || "",
+      avatarUrl: d.avatarUrl || null,
+      roleId: d.roleId || null,
+      departmentName,
+    };
+    employeeMap.set(doc.id, empData);
+    allActiveEmps.push(empData);
+  }
+
+  const currentUserEmp = employeeMap.get(user.id);
+  const userDepartmentName = currentUserEmp?.departmentName || user.departmentName || "General";
+  const isExec = isExecutiveOrAdmin(user);
+
+  // 2. Department-scoped AuditLog records:
+  // - CEO, COO, and ADMIN: see company-wide activity
+  // - Other departments: ONLY see activities belonging to their own department
+  let logsSnap;
+  let visibleEmployeesList: Array<{ id: string; name: string }> = [];
+
+  if (isExec) {
+    logsSnap = await adminDb.collection("AuditLog").orderBy("createdAt", "desc").limit(200).get();
+    visibleEmployeesList = allActiveEmps.map((e) => ({ id: e.id, name: e.name }));
+  } else {
+    const deptEmps = allActiveEmps.filter(
+      (e) => e.departmentName.toLowerCase() === userDepartmentName.toLowerCase()
+    );
+    const deptMemberIds = deptEmps.map((e) => e.id);
+    if (!deptMemberIds.includes(user.id)) {
+      deptMemberIds.push(user.id);
+    }
+
+    logsSnap = await adminDb
+      .collection("AuditLog")
+      .where("actorId", "in", deptMemberIds)
+      .orderBy("createdAt", "desc")
+      .limit(150)
+      .get();
+
+    visibleEmployeesList = deptEmps.map((e) => ({ id: e.id, name: e.name }));
+  }
+
+  visibleEmployeesList.sort((a, b) => a.name.localeCompare(b.name));
+
+  // 3. Extract referenced Task IDs within retention window (last 30 days)
   const oneMonthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const rawDocs = (logsSnap.docs || []).filter((d) => {
     const created = d.data().createdAt?.toDate
@@ -32,58 +90,25 @@ export default async function ActivitiesPage() {
       : new Date(d.data().createdAt || Date.now());
     return created >= oneMonthAgo;
   });
-  const actorIds = new Set<string>();
-  const taskIds = new Set<string>();
 
+  const taskIds = new Set<string>();
   for (const d of rawDocs) {
     const data = d.data();
-    if (data.actorId) actorIds.add(data.actorId);
     if (data.entity === "Task" && data.entityId) {
       taskIds.add(data.entityId);
     }
   }
 
-  // 3. Parallel fetch Employees, referenced Tasks, and Departments
-  const [employeesSnap, tasksSnap, departmentsSnap, rolesSnap] = await Promise.all([
-    actorIds.size > 0 ? adminDb.collection("Employee").get() : Promise.resolve({ docs: [] }),
-    taskIds.size > 0
-      ? Promise.all(Array.from(taskIds).map((id) => adminDb.collection("Task").doc(id).get()))
-      : Promise.resolve([]),
-    adminDb.collection("Department").get(),
-    adminDb.collection("Role").get(),
-  ]);
-
-  // Build lookup maps
-  const employeeMap = new Map<string, any>();
-  const allEmployeesList: Array<{ id: string; name: string }> = [];
-  for (const doc of employeesSnap.docs || []) {
-    const d = doc.data();
-    employeeMap.set(doc.id, {
-      id: doc.id,
-      name: d.name || "Unknown",
-      email: d.email || "",
-      avatarUrl: d.avatarUrl || null,
-      roleId: d.roleId || null,
-    });
-    allEmployeesList.push({ id: doc.id, name: d.name || "Unknown" });
-  }
-  allEmployeesList.sort((a, b) => a.name.localeCompare(b.name));
-
-  const roleMap = new Map<string, any>();
-  for (const doc of rolesSnap.docs || []) {
-    roleMap.set(doc.id, doc.data());
-  }
-
   const taskMap = new Map<string, any>();
-  for (const doc of tasksSnap) {
-    if (doc.exists) {
-      taskMap.set(doc.id, { id: doc.id, title: doc.data()!.title });
+  if (taskIds.size > 0) {
+    const tasksDocs = await Promise.all(
+      Array.from(taskIds).map((id) => adminDb.collection("Task").doc(id).get())
+    );
+    for (const doc of tasksDocs) {
+      if (doc.exists) {
+        taskMap.set(doc.id, { id: doc.id, title: doc.data()!.title });
+      }
     }
-  }
-
-  const deptMap = new Map<string, string>();
-  for (const doc of departmentsSnap.docs || []) {
-    deptMap.set(doc.id, doc.data().name);
   }
 
   // 4. Enrich each audit log into a human-readable ActivityItem
@@ -370,8 +395,9 @@ export default async function ActivitiesPage() {
   return (
     <ActivitiesView
       logs={activityItems}
-      isManager={isManager}
-      employees={allEmployeesList}
+      isManager={isExec}
+      departmentName={isExec ? undefined : userDepartmentName}
+      employees={visibleEmployeesList}
     />
   );
 }

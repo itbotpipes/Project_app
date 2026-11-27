@@ -35,9 +35,10 @@ export interface ActivitiesViewProps {
   logs: ActivityItem[];
   isManager: boolean;
   employees: Array<{ id: string; name: string }>;
+  departmentName?: string;
 }
 
-export default function ActivitiesView({ logs, isManager, employees }: ActivitiesViewProps) {
+export default function ActivitiesView({ logs, isManager, employees, departmentName }: ActivitiesViewProps) {
   const [searchQuery, setSearchQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<string>("ALL");
   const [actorFilter, setActorFilter] = useState<string>("ALL");
@@ -121,7 +122,11 @@ export default function ActivitiesView({ logs, isManager, employees }: Activitie
       <div>
         <h1 className="text-2xl font-semibold">Activities</h1>
         <p className="text-sm text-slate-500">
-          {isManager ? "Everything happening across TaskFlow." : "Your recent activity and task updates."}
+          {departmentName
+            ? `Recent activity and task updates for ${departmentName} department.`
+            : isManager
+            ? "Everything happening across TaskFlow."
+            : "Your recent activity and task updates."}
         </p>
       </div>
 

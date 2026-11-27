@@ -30,9 +30,6 @@ export function isExecutiveOrAdmin(user: any): boolean {
   ) {
     return true;
   }
-  if (canScoreCompanyWide(user) || hasPermission(user, "admin")) {
-    return true;
-  }
   const roleTitle = (
     user.role?.title ||
     user.roleTitle ||
@@ -642,11 +639,8 @@ export async function loadCompanyDailyWorkSummaries(
         return true;
       });
 
-      // Manager department scope: their own department + all departments of reporting members
+      // In Department View: Every department can ONLY see their own department's daily summary
       if (userDepartmentName) permittedDeptNames.add(userDepartmentName);
-      permittedEmployees.forEach((e) => {
-        if (e.departmentName) permittedDeptNames.add(e.departmentName);
-      });
     } else {
       // 3. Regular Employees: can ONLY see their own individual summary & their own department
       viewScope = "SELF";
@@ -823,17 +817,17 @@ export async function loadCompanyDailyWorkSummaries(
 
   // Filter departmentSummaries according to role permissions:
   // - CEO/COO/Admin see all company departments
-  // - Managers see their own department + reporting members' departments
-  // - Regular employees see ONLY their own department
+  // - All other departments can ONLY see their own department's daily summary
   let scopedDepartmentSummaries = departmentSummaries;
   if (!isExec) {
-    scopedDepartmentSummaries = departmentSummaries.filter((d) =>
-      permittedDeptNames.has(d.departmentName)
+    scopedDepartmentSummaries = departmentSummaries.filter(
+      (d) => userDepartmentName && d.departmentName.toLowerCase() === userDepartmentName.toLowerCase()
     );
     // Discrepancy fallback: ensure at least user's department is present if active
     if (scopedDepartmentSummaries.length === 0 && userDepartmentName) {
       scopedDepartmentSummaries = departmentSummaries.filter(
-        (d) => d.departmentName.toLowerCase() === userDepartmentName!.toLowerCase()
+        (d) => d.departmentName.trim().toLowerCase().includes(userDepartmentName!.trim().toLowerCase()) ||
+               userDepartmentName!.trim().toLowerCase().includes(d.departmentName.trim().toLowerCase())
       );
     }
   }
