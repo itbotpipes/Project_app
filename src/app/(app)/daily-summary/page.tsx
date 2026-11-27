@@ -38,13 +38,20 @@ export default async function DailySummaryPage({
     user.systemRole === "CEO" ||
     isManagerLike(user.systemRole, user.systemRoleObj);
 
+  const initialView =
+    data.viewScope === "SELF"
+      ? "INDIVIDUAL"
+      : sp.view === "individual"
+      ? "INDIVIDUAL"
+      : "DEPARTMENT";
+
   return (
     <div className="mx-auto max-w-6xl space-y-6">
       <DailySummaryView
         data={data}
         currentUserId={user.id}
         isAdminOrManager={isAdminOrManager}
-        initialView={sp.view === "department" ? "DEPARTMENT" : sp.view === "individual" ? "INDIVIDUAL" : undefined}
+        initialView={initialView}
         initialDept={sp.dept || undefined}
       />
     </div>

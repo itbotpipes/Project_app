@@ -33,8 +33,13 @@ export default function DailySummaryView({
 }) {
   const router = useRouter();
 
-  // Mode: Department Summaries vs Individual Summaries
-  const [viewMode, setViewMode] = useState<"DEPARTMENT" | "INDIVIDUAL">(initialView);
+  // Mode: Department Summaries vs Individual Summaries (locked to INDIVIDUAL if SELF)
+  const [viewMode, setViewMode] = useState<"DEPARTMENT" | "INDIVIDUAL">(() => {
+    if (data.viewScope === "SELF" || data.departmentSummaries.length === 0) {
+      return "INDIVIDUAL";
+    }
+    return initialView;
+  });
 
   // Selected Department
   const [selectedDeptName, setSelectedDeptName] = useState<string>(() => {
@@ -202,107 +207,107 @@ export default function DailySummaryView({
         </div>
       </div>
 
-      {/* View Toggle Bar */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 border border-slate-200/80">
-          <button
-            onClick={() => setViewMode("DEPARTMENT")}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition",
-              viewMode === "DEPARTMENT"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            )}
-          >
-            <Building2 size={14} className={viewMode === "DEPARTMENT" ? "text-blue-600" : "text-slate-400"} />
-            <span>
-              {data.viewScope === "SELF"
-                ? "Department"
-                : `Departments (${data.departmentSummaries.length})`}
-            </span>
-          </button>
-
-          <button
-            onClick={() => setViewMode("INDIVIDUAL")}
-            className={cn(
-              "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition",
-              viewMode === "INDIVIDUAL"
-                ? "bg-white text-slate-900 shadow-xs"
-                : "text-slate-600 hover:text-slate-900"
-            )}
-          >
-            <User size={14} className={viewMode === "INDIVIDUAL" ? "text-blue-600" : "text-slate-400"} />
-            <span>
-              {data.viewScope === "SELF"
-                ? "My Summary"
-                : data.viewScope === "TEAM"
-                ? `Team (${data.summaries.length})`
-                : `Employees (${data.summaries.length})`}
-            </span>
-          </button>
-        </div>
-
-        {/* Quick context indicator or selector */}
-        {viewMode === "DEPARTMENT" ? (
-          data.departmentSummaries.length > 1 ? (
-            <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-0.5">
-              {data.departmentSummaries.map((dept) => {
-                const isSelected = dept.departmentName === selectedDeptName;
-                return (
-                  <button
-                    key={dept.departmentName}
-                    onClick={() => setSelectedDeptName(dept.departmentName)}
-                    className={cn(
-                      "px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition",
-                      isSelected
-                        ? "bg-slate-900 text-white shadow-xs"
-                        : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
-                    )}
-                  >
-                    {dept.departmentName}
-                  </button>
-                );
-              })}
-            </div>
-          ) : data.departmentSummaries.length === 1 ? (
-            <div className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200/60">
-              {data.departmentSummaries[0].departmentName} Department
-            </div>
-          ) : null
-        ) : (
-          data.viewScope !== "SELF" && (
-            <div className="flex items-center gap-2">
-              <div className="relative">
-                <Search size={14} className="absolute left-2.5 top-2 text-slate-400" />
-                <input
-                  type="text"
-                  placeholder="Filter members..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  className="pl-8 pr-3 py-1 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-blue-500 w-44"
-                />
-              </div>
-
-              {departments.length > 2 && (
-                <select
-                  value={departmentFilter}
-                  onChange={(e) => setDepartmentFilter(e.target.value)}
-                  className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-hidden"
-                >
-                  {departments.map((d) => (
-                    <option key={d} value={d}>
-                      {d === "ALL" ? "All Depts" : d}
-                    </option>
-                  ))}
-                </select>
+      {/* View Toggle Bar (Only available if user has permission to see Department summaries, i.e. Managers and Executives) */}
+      {data.departmentSummaries.length > 0 && (
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div className="flex items-center gap-1 rounded-xl bg-slate-100 p-1 border border-slate-200/80">
+            <button
+              onClick={() => setViewMode("DEPARTMENT")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition",
+                viewMode === "DEPARTMENT"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
               )}
-            </div>
-          )
-        )}
-      </div>
+            >
+              <Building2 size={14} className={viewMode === "DEPARTMENT" ? "text-blue-600" : "text-slate-400"} />
+              <span>
+                {data.departmentSummaries.length === 1
+                  ? "Department"
+                  : `Departments (${data.departmentSummaries.length})`}
+              </span>
+            </button>
+
+            <button
+              onClick={() => setViewMode("INDIVIDUAL")}
+              className={cn(
+                "flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition",
+                viewMode === "INDIVIDUAL"
+                  ? "bg-white text-slate-900 shadow-xs"
+                  : "text-slate-600 hover:text-slate-900"
+              )}
+            >
+              <User size={14} className={viewMode === "INDIVIDUAL" ? "text-blue-600" : "text-slate-400"} />
+              <span>
+                {data.viewScope === "TEAM"
+                  ? `Team (${data.summaries.length})`
+                  : `Employees (${data.summaries.length})`}
+              </span>
+            </button>
+          </div>
+
+          {/* Quick context indicator or selector */}
+          {viewMode === "DEPARTMENT" ? (
+            data.departmentSummaries.length > 1 ? (
+              <div className="flex items-center gap-1.5 overflow-x-auto max-w-full pb-0.5">
+                {data.departmentSummaries.map((dept) => {
+                  const isSelected = dept.departmentName === selectedDeptName;
+                  return (
+                    <button
+                      key={dept.departmentName}
+                      onClick={() => setSelectedDeptName(dept.departmentName)}
+                      className={cn(
+                        "px-3 py-1 rounded-lg text-xs font-medium whitespace-nowrap transition",
+                        isSelected
+                          ? "bg-slate-900 text-white shadow-xs"
+                          : "bg-slate-100 text-slate-600 hover:bg-slate-200 hover:text-slate-900"
+                      )}
+                    >
+                      {dept.departmentName}
+                    </button>
+                  );
+                })}
+              </div>
+            ) : data.departmentSummaries.length === 1 ? (
+              <div className="text-xs font-semibold text-slate-700 bg-slate-100 px-3 py-1 rounded-lg border border-slate-200/60">
+                {data.departmentSummaries[0].departmentName} Department
+              </div>
+            ) : null
+          ) : (
+            data.viewScope !== "SELF" && (
+              <div className="flex items-center gap-2">
+                <div className="relative">
+                  <Search size={14} className="absolute left-2.5 top-2 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Filter members..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="pl-8 pr-3 py-1 text-xs rounded-xl border border-slate-200 bg-white focus:outline-hidden focus:border-blue-500 w-44"
+                  />
+                </div>
+
+                {departments.length > 2 && (
+                  <select
+                    value={departmentFilter}
+                    onChange={(e) => setDepartmentFilter(e.target.value)}
+                    className="rounded-xl border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700 focus:outline-hidden"
+                  >
+                    {departments.map((d) => (
+                      <option key={d} value={d}>
+                        {d === "ALL" ? "All Depts" : d}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+            )
+          )}
+        </div>
+      )}
 
       {/* DEPARTMENT VIEW */}
-      {viewMode === "DEPARTMENT" && (
+      {viewMode === "DEPARTMENT" && data.departmentSummaries.length > 0 && (
         <div>
           {currentDepartmentSummary ? (
             <DepartmentSummaryCard
@@ -320,7 +325,7 @@ export default function DailySummaryView({
       )}
 
       {/* INDIVIDUAL VIEW */}
-      {viewMode === "INDIVIDUAL" && (
+      {(viewMode === "INDIVIDUAL" || data.departmentSummaries.length === 0) && (
         <div className="space-y-4">
           {/* Employee Selector Bar (if viewing team) */}
           {data.viewScope !== "SELF" && (

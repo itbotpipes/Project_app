@@ -816,10 +816,13 @@ export async function loadCompanyDailyWorkSummaries(
   }
 
   // Filter departmentSummaries according to role permissions:
-  // - CEO/COO/Admin see all company departments
-  // - All other departments can ONLY see their own department's daily summary
-  let scopedDepartmentSummaries = departmentSummaries;
-  if (!isExec) {
+  // - CEO/COO/Admin: see all company departments
+  // - Department Managers (viewScope === "TEAM"): see ONLY their own department's daily summary
+  // - Regular employees (viewScope === "SELF"): strictly NO department summary (only their own individual summary)
+  let scopedDepartmentSummaries: DepartmentDailyWorkSummary[] = [];
+  if (isExec) {
+    scopedDepartmentSummaries = departmentSummaries;
+  } else if (viewScope === "TEAM") {
     scopedDepartmentSummaries = departmentSummaries.filter(
       (d) => userDepartmentName && d.departmentName.toLowerCase() === userDepartmentName.toLowerCase()
     );
@@ -830,6 +833,9 @@ export async function loadCompanyDailyWorkSummaries(
                userDepartmentName!.trim().toLowerCase().includes(d.departmentName.trim().toLowerCase())
       );
     }
+  } else {
+    // Regular employees never see department summary or other members' tasks
+    scopedDepartmentSummaries = [];
   }
 
   // Sort departments: put user's own department first, then alphabetical
